@@ -8,7 +8,7 @@ database:
 
 marzban:
   api_url: "http://81.31.244.167:8000"  # URL вашего Marzban-сервера
-  api_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImFjY2VzcyI6InN1ZG8iLCJleHAiOjE3MzIxMzEyMzl9.HbIIttgs-fgu3n4nsC4NOU6kHdZMj-JpSBTFxmO-7Mk"            # API-ключ для работы с Marzban
+  api_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImFjY2VzcyI6InN1ZG8iLCJleHAiOjE3MzIyMTg5NDV9.797XG6HpH1AjMIYo23hB7XeRB8r-Od7-J3kWpehVDXk"            # API-ключ для работы с Marzban
 
 payments:
   webhook_secret: "YOUR_WEBHOOK_SECRET"      # Секрет для валидации платежных webhook

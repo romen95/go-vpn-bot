@@ -95,6 +95,12 @@ func (db *DB) GetAllUsers() ([]User, error) {
 	return users, nil
 }
 
+func (db *DB) UpdateUserConfig(userID int64, config string) error {
+	query := "UPDATE users SET config = ? WHERE id = ?"
+	_, err := db.Conn.Exec(query, config, userID)
+	return err
+}
+
 type User struct {
 	ID      int64
 	Balance float64

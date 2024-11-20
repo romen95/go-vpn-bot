@@ -22,8 +22,6 @@ func main() {
 		log.Fatalf("Ошибка загрузки конфигурации: %v", err)
 	}
 
-	log.Printf("Токен бота: %s", cfg.Bot.Token)
-
 	// Запуск Telegram-бота
 	bot.RunBot(db, cfg.Bot.Token)
 }
