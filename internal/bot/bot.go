@@ -30,12 +30,11 @@ func RunBot(database *database.DB, botToken string) {
 	// Настраиваем получение обновлений
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
+
 	updates := bot.GetUpdatesChan(u)
 
-	// Обработка обновлений
+	// Обрабатываем каждое обновление
 	for update := range updates {
-		if update.Message != nil {
-			handler.HandleMessage(update.Message)
-		}
+		handler.HandleUpdate(update) // Вызываем метод для обработки обновлений
 	}
 }
