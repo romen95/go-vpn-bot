@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+
+	"github.com/spf13/viper"
 )
 
 // UserRequest представляет тело запроса для создания нового пользователя.
@@ -21,6 +24,82 @@ type UserRequest struct {
 type UserResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`
+}
+
+func GetAPIKey(apiURL, username, password string) (string, error) {
+	apiEndpoint := fmt.Sprintf("%s/api/admin/token", apiURL)
+
+	// Формируем тело запроса
+	formData := url.Values{}
+	formData.Set("grant_type", "")
+	formData.Set("username", username)
+	formData.Set("password", password)
+	formData.Set("scope", "")
+	formData.Set("client_id", "")
+	formData.Set("client_secret", "")
+
+	// Создаём HTTP-запрос
+	req, err := http.NewRequest("POST", apiEndpoint, bytes.NewBufferString(formData.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("ошибка создания запроса: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("accept", "application/json")
+
+	// Выполняем запрос
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("ошибка выполнения запроса: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Читаем тело ответа
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("ошибка чтения тела ответа: %v", err)
+	}
+
+	// Проверяем статус ответа
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("неудачный статус ответа: %d, тело: %s", resp.StatusCode, string(respBody))
+	}
+
+	// Декодируем JSON-ответ
+	var tokenResp struct {
+		AccessToken string `json:"access_token"`
+	}
+
+	if err := json.Unmarshal(respBody, &tokenResp); err != nil {
+		return "", fmt.Errorf("ошибка обработки ответа: %v", err)
+	}
+
+	if tokenResp.AccessToken == "" {
+		return "", fmt.Errorf("токен отсутствует в ответе")
+	}
+
+	return tokenResp.AccessToken, nil
+}
+
+func UpdateAPIKey(configPath, newAPIKey string) error {
+	// Загружаем текущую конфигурацию
+	viper.SetConfigFile(configPath)
+	viper.SetConfigType("yaml")
+
+	if err := viper.ReadInConfig(); err != nil {
+		return fmt.Errorf("ошибка чтения конфигурации: %v", err)
+	}
+
+	// Обновляем значение APIKey
+	viper.Set("marzban.api_key", newAPIKey)
+
+	// Сохраняем изменения в файл
+	if err := viper.WriteConfig(); err != nil {
+		return fmt.Errorf("ошибка записи конфигурации: %v", err)
+	}
+
+	return nil
 }
 
 // CreateUser отправляет запрос для создания нового пользователя на сервере Marzban.

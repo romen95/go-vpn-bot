@@ -1,24 +1,22 @@
-bot:
-  token: "7656241581:AAHo0Dt2RWKw93uYQNV4riWBaDRgfGR8ayw"  # Токен вашего Telegram-бота
-  admin_id: 123456789              # ID администратора для уведомлений
-
-database:
-  driver: "sqlite"                # Драйвер базы данных (sqlite3, postgres, mysql)
-  dsn: "vpn-bot.db"                # DSN для подключения (для SQLite — имя файла)
-
-marzban:
-  api_url: "http://81.31.244.167:8000"  # URL вашего Marzban-сервера
-  api_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImFjY2VzcyI6InN1ZG8iLCJleHAiOjE3MzIyMTg5NDV9.797XG6HpH1AjMIYo23hB7XeRB8r-Od7-J3kWpehVDXk"            # API-ключ для работы с Marzban
-
-payments:
-  webhook_secret: "YOUR_WEBHOOK_SECRET"      # Секрет для валидации платежных webhook
-  provider: "yookassa"                       # Провайдер платежей (например, yookassa, stripe)
-  provider_config:
-    yookassa:
-      shop_id: "YOUR_SHOP_ID"
-      secret_key: "YOUR_SECRET_KEY"
-
 app:
-  test_period_days: 7                        # Длительность тестового периода в днях
-  default_traffic_limit_gb: 10               # Ограничение трафика по умолчанию в GB
-  check_interval_minutes: 60                 # Интервал проверки баланса в минутах
+    check_interval_minutes: 60
+    default_traffic_limit_gb: 10
+    test_period_days: 7
+bot:
+    admin_id: 123456789
+    token: 7656241581:AAHo0Dt2RWKw93uYQNV4riWBaDRgfGR8ayw
+database:
+    driver: sqlite
+    dsn: vpn-bot.db
+marzban:
+    api_key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImFjY2VzcyI6InN1ZG8iLCJleHAiOjE3MzIzNzI1MzF9.1kEPaDW6PccoZnnxuRSq-jy7193Qpfap7qjh1c7u7kQ
+    api_url: http://81.31.244.167:8000
+    password: XvGVzoEIiLMUkOK6
+    username: admin
+payments:
+    provider: yookassa
+    provider_config:
+        yookassa:
+            secret_key: YOUR_SECRET_KEY
+            shop_id: YOUR_SHOP_ID
+    webhook_secret: YOUR_WEBHOOK_SECRET

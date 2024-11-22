@@ -39,10 +39,107 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 	log.Printf("Обработка callback: %s", callback.Data) // Лог для отладки
 	switch callback.Data {
 	case "get_started":
-		// Уведомляем пользователя
-		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Отлично! Теперь вы можете воспользоваться командой /get_config, чтобы получить VPN-конфиг.")
+		user := h.DB.GetUserByID(callback.Message.Chat.ID)
+		if user == nil {
+			// Создаем нового пользователя
+			err := h.DB.CreateUser(callback.Message.Chat.ID)
+			if err != nil {
+				msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Произошла ошибка при создании пользователя.")
+				if _, err := h.Bot.Send(msg); err != nil {
+					log.Printf("Ошибка отправки сообщения: %v", err)
+				}
+				return
+			}
+		}
+
+		if user.Config == "" {
+			username := fmt.Sprintf("%d", callback.Message.Chat.ID)
+
+			cfg, err := config.LoadConfig()
+			if err != nil {
+				log.Printf("Ошибка загрузки конфигурации: %v", err)
+				msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Ошибка загрузки конфигурации.")
+				if _, err := h.Bot.Send(msg); err != nil {
+					log.Printf("Ошибка отправки сообщения: %v", err)
+				}
+				return
+			}
+
+			// Отправляем запрос на создание пользователя в Marzban
+			userResp, err := marzban.CreateUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, username)
+			if err != nil {
+				log.Printf("Получаем новый токен")
+				// Получаем новый токен
+				newAPIKey, err := marzban.GetAPIKey(cfg.Marzban.APIURL, cfg.Marzban.Username, cfg.Marzban.Password)
+				if err != nil {
+					log.Printf("Не удалось получить новый токен: %v", err)
+					msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Произошла ошибка при создании VPN-конфигурации.")
+					h.Bot.Send(msg)
+					return
+				}
+
+				err = marzban.UpdateAPIKey("configs/config.yaml", newAPIKey)
+				if err != nil {
+					log.Printf("Не удалось обновить конфиг: %v", err)
+					msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Произошла ошибка при обновлении конфигурации.")
+					h.Bot.Send(msg)
+					return
+				}
+
+				// Повторяем запрос CreateUser
+				cfg.Marzban.APIKey = newAPIKey // Обновляем APIKey в памяти
+				userResp, err = marzban.CreateUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, username)
+				if err != nil {
+					log.Printf("Ошибка создания пользователя даже после обновления токена: %v", err)
+					msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Произошла ошибка при создании VPN-конфигурации.")
+					h.Bot.Send(msg)
+					return
+				}
+			}
+
+			if !userResp.Success {
+				log.Printf("Не удалось создать пользователя в Marzban для %d: %s", callback.Message.Chat.ID, userResp.Message)
+				msg := tgbotapi.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("Ошибка создания конфигурации: %s", userResp.Message))
+				if _, err := h.Bot.Send(msg); err != nil {
+					log.Printf("Ошибка отправки сообщения: %v", err)
+				}
+				return
+			}
+
+			// Сохраняем конфиг в базе данных
+			err = h.DB.UpdateUserConfig(callback.Message.Chat.ID, userResp.Message)
+			if err != nil {
+				log.Printf("Ошибка обновления конфига в базе для пользователя %d: %v", callback.Message.Chat.ID, err)
+				msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Произошла ошибка при сохранении конфигурации.")
+				if _, err := h.Bot.Send(msg); err != nil {
+					log.Printf("Ошибка отправки сообщения: %v", err)
+				}
+				return
+			}
+		}
+
+		// Информация о сервисе
+		guideText := "Гайд по установке\n\n" +
+			"Выберите операционную систему\n\n" +
+			"Вы увидите подробную инструкцию по настройке со ссылкой на скачивание приложения\n\n" +
+			"Текущий сервер подключения:\n" +
+			"🇳🇱 Нидерланды\n\n" +
+			"🟢 Нажмите на КЛЮЧ и он автоматически скопируется:\n" +
+			user.Config
+
+		// Создаем inline-кнопку
+		buttonIOS := tgbotapi.NewInlineKeyboardButtonData("📱 iOS", "get_ios_guide")
+		buttonAndroid := tgbotapi.NewInlineKeyboardButtonData("📱 Android", "get_android_guide")
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(buttonIOS, buttonAndroid),
+		)
+
+		// Отправляем сообщение с кнопкой
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, guideText)
+		msg.ReplyMarkup = keyboard
+
 		if _, err := h.Bot.Send(msg); err != nil {
-			log.Printf("Ошибка отправки ответа на нажатие кнопки: %v", err)
+			log.Printf("Ошибка отправки приветственного сообщения: %v", err)
 		}
 
 		// Отправляем ответ на callback
@@ -67,6 +164,7 @@ func (h *BotHandler) handleStart(message *tgbotapi.Message) {
 			}
 			return
 		}
+
 	}
 
 	// Информация о сервисе
@@ -156,12 +254,33 @@ func (h *BotHandler) handleGetConfig(message *tgbotapi.Message) {
 	// Отправляем запрос на создание пользователя в Marzban
 	userResp, err := marzban.CreateUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, username)
 	if err != nil {
-		log.Printf("Ошибка создания пользователя в Marzban для %d: %v", message.Chat.ID, err)
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании VPN-конфигурации.")
-		if _, err := h.Bot.Send(msg); err != nil {
-			log.Printf("Ошибка отправки сообщения: %v", err)
+		log.Printf("Получаем новый токен")
+		// Получаем новый токен
+		newAPIKey, err := marzban.GetAPIKey(cfg.Marzban.APIURL, cfg.Marzban.Username, cfg.Marzban.Password)
+		if err != nil {
+			log.Printf("Не удалось получить новый токен: %v", err)
+			msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании VPN-конфигурации.")
+			h.Bot.Send(msg)
+			return
 		}
-		return
+
+		err = marzban.UpdateAPIKey("configs/config.yaml", newAPIKey)
+		if err != nil {
+			log.Printf("Не удалось обновить конфиг: %v", err)
+			msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при обновлении конфигурации.")
+			h.Bot.Send(msg)
+			return
+		}
+
+		// Повторяем запрос CreateUser
+		cfg.Marzban.APIKey = newAPIKey // Обновляем APIKey в памяти
+		userResp, err = marzban.CreateUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, username)
+		if err != nil {
+			log.Printf("Ошибка создания пользователя даже после обновления токена: %v", err)
+			msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании VPN-конфигурации.")
+			h.Bot.Send(msg)
+			return
+		}
 	}
 
 	if !userResp.Success {

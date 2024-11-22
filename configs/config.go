@@ -16,8 +16,10 @@ type Config struct {
 		DSN    string `mapstructure:"dsn"`
 	} `mapstructure:"database"`
 	Marzban struct {
-		APIURL string `mapstructure:"api_url"`
-		APIKey string `mapstructure:"api_key"`
+		APIURL   string `mapstructure:"api_url"`
+		APIKey   string `mapstructure:"api_key"`
+		Username string `mapstructure:"username"`
+		Password string `mapstructure:"password"`
 	} `mapstructure:"marzban"`
 	Payments struct {
 		WebhookSecret string `mapstructure:"webhook_secret"`
