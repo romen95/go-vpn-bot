@@ -3,12 +3,21 @@ package database
 import (
 	"database/sql"
 	"log"
+	"time"
 
 	_ "modernc.org/sqlite" // SQLite driver
 )
 
 type DB struct {
 	Conn *sql.DB
+}
+
+type User struct {
+	ID                  int64
+	Balance             float64
+	Config              string
+	TrialEndDate        sql.NullTime
+	SubscriptionEndDate sql.NullTime
 }
 
 // ConnectDB подключается к базе данных и создает таблицу, если она не существует
@@ -37,7 +46,9 @@ func createUsersTable(conn *sql.DB) error {
 	CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY,
 		balance REAL DEFAULT 0,
-		config TEXT DEFAULT ''
+		config TEXT DEFAULT '',
+		trial_end_date DATETIME DEFAULT NULL,
+		subscription_end_date DATETIME DEFAULT NULL
 	);
 	`
 	_, err := conn.Exec(query)
@@ -55,8 +66,8 @@ func (db *DB) Close() {
 
 func (db *DB) GetUserByID(userID int64) *User {
 	var user User
-	query := "SELECT id, balance, config FROM users WHERE id = ?"
-	err := db.Conn.QueryRow(query, userID).Scan(&user.ID, &user.Balance, &user.Config)
+	query := "SELECT id, balance, config, trial_end_date, subscription_end_date FROM users WHERE id = ?"
+	err := db.Conn.QueryRow(query, userID).Scan(&user.ID, &user.Balance, &user.Config, &user.TrialEndDate, &user.SubscriptionEndDate)
 	if err != nil {
 		return nil
 	}
@@ -101,8 +112,32 @@ func (db *DB) UpdateUserConfig(userID int64, config string) error {
 	return err
 }
 
-type User struct {
-	ID      int64
-	Balance float64
-	Config  string
+func (db *DB) GetUserConfig(userID int64) string {
+	var config string
+
+	query := "SELECT config FROM users WHERE id = ?"
+	err := db.Conn.QueryRow(query, userID).Scan(&config)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// Если пользователь не найден, возвращаем пустую строку
+			return ""
+		}
+		// Логируем ошибку, если произошла другая проблема
+		log.Printf("Ошибка при получении конфига пользователя с ID %d: %v", userID, err)
+		return ""
+	}
+
+	return config
+}
+
+func (db *DB) UpdateTrialEndDate(userID int64, endDate time.Time) error {
+	query := "UPDATE users SET trial_end_date = ? WHERE id = ?"
+	_, err := db.Conn.Exec(query, endDate, userID)
+	return err
+}
+
+func (db *DB) UpdateSubscriptionEndDate(userID int64, endDate time.Time) error {
+	query := "UPDATE users SET subscription_end_date = ? WHERE id = ?"
+	_, err := db.Conn.Exec(query, endDate, userID)
+	return err
 }

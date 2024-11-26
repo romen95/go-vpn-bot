@@ -52,7 +52,8 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 			}
 		}
 
-		if user.Config == "" {
+		configUser := h.DB.GetUserConfig(callback.Message.Chat.ID)
+		if configUser == "" {
 			username := fmt.Sprintf("%d", callback.Message.Chat.ID)
 
 			cfg, err := config.LoadConfig()
@@ -125,7 +126,7 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 			"Текущий сервер подключения:\n" +
 			"🇳🇱 Нидерланды\n\n" +
 			"🟢 Нажмите на КЛЮЧ и он автоматически скопируется:\n" +
-			user.Config
+			configUser
 
 		// Создаем inline-кнопку
 		buttonIOS := tgbotapi.NewInlineKeyboardButtonData("📱 iOS", "get_ios_guide")
