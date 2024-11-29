@@ -9,9 +9,9 @@ database:
     driver: sqlite
     dsn: vpn-bot.db
 marzban:
-    api_key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImFjY2VzcyI6InN1ZG8iLCJpYXQiOjE3MzI2MzYyMTYsImV4cCI6MTczMjcyMjYxNn0.TYDGtNpFcTPqYRUdwKRLe9yZZ07mRGmG5VS8HTrgNNU
-    api_url: https://boogaga.duckdns.org:63468
-    password: 5Y7kPO7so5
+    api_key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImFjY2VzcyI6InN1ZG8iLCJpYXQiOjE3MzI4NzI0ODYsImV4cCI6MTczMjk1ODg4Nn0.a-ysasR1ZhZ3q3OaDfwW7cd2d9VJKgcTxx80Pj_PRE0
+    api_url: https://boogaga.duckdns.org:63055
+    password: SS1XcMqa6Y
     username: admin
 payments:
     provider: yookassa

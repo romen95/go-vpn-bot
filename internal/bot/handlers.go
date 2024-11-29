@@ -41,8 +41,17 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 	case "get_started":
 		user := h.DB.GetUserByID(callback.Message.Chat.ID)
 		if user == nil {
+			cfg, err := config.LoadConfig()
+			if err != nil {
+				log.Printf("Ошибка загрузки конфигурации: %v", err)
+				msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Ошибка загрузки конфигурации.")
+				if _, err := h.Bot.Send(msg); err != nil {
+					log.Printf("Ошибка отправки сообщения: %v", err)
+				}
+				return
+			}
 			// Создаем нового пользователя
-			err := h.DB.CreateUser(callback.Message.Chat.ID)
+			err = h.DB.CreateUser(callback.Message.Chat.ID, cfg.App.TestPeriodDays)
 			if err != nil {
 				msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Произошла ошибка при создании пользователя.")
 				if _, err := h.Bot.Send(msg); err != nil {
@@ -117,6 +126,7 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 				}
 				return
 			}
+			configUser = h.DB.GetUserConfig(callback.Message.Chat.ID)
 		}
 
 		// Информация о сервисе
@@ -131,8 +141,15 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		// Создаем inline-кнопку
 		buttonIOS := tgbotapi.NewInlineKeyboardButtonData("📱 iOS", "get_ios_guide")
 		buttonAndroid := tgbotapi.NewInlineKeyboardButtonData("📱 Android", "get_android_guide")
+		buttonWindows := tgbotapi.NewInlineKeyboardButtonData("🖥 Windows", "get_windows_guide")
+		buttonMac := tgbotapi.NewInlineKeyboardButtonData("🖥 MacOS", "get_mac_guide")
+		buttonChangeCountry := tgbotapi.NewInlineKeyboardButtonData("Сменить страну", "change_country")
+		buttonBack := tgbotapi.NewInlineKeyboardButtonData("◀️ Назад", "go_back")
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(buttonIOS, buttonAndroid),
+			tgbotapi.NewInlineKeyboardRow(buttonMac, buttonWindows),
+			tgbotapi.NewInlineKeyboardRow(buttonChangeCountry),
+			tgbotapi.NewInlineKeyboardRow(buttonBack),
 		)
 
 		// Отправляем сообщение с кнопкой
@@ -156,8 +173,17 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 func (h *BotHandler) handleStart(message *tgbotapi.Message) {
 	user := h.DB.GetUserByID(message.Chat.ID)
 	if user == nil {
+		cfg, err := config.LoadConfig()
+		if err != nil {
+			log.Printf("Ошибка загрузки конфигурации: %v", err)
+			msg := tgbotapi.NewMessage(message.Chat.ID, "Ошибка загрузки конфигурации.")
+			if _, err := h.Bot.Send(msg); err != nil {
+				log.Printf("Ошибка отправки сообщения: %v", err)
+			}
+			return
+		}
 		// Создаем нового пользователя
-		err := h.DB.CreateUser(message.Chat.ID)
+		err = h.DB.CreateUser(message.Chat.ID, cfg.App.TestPeriodDays)
 		if err != nil {
 			msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании пользователя.")
 			if _, err := h.Bot.Send(msg); err != nil {

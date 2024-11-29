@@ -74,9 +74,10 @@ func (db *DB) GetUserByID(userID int64) *User {
 	return &user
 }
 
-func (db *DB) CreateUser(userID int64) error {
-	query := "INSERT INTO users (id, balance, config) VALUES (?, 0, '')"
-	_, err := db.Conn.Exec(query, userID)
+func (db *DB) CreateUser(userID int64, trialDays int) error {
+	trialEnd := time.Now().AddDate(0, 0, trialDays) // добавляем 7 дней
+	query := "INSERT INTO users (id, balance, config, trial_end_date) VALUES (?, 0, '', ?)"
+	_, err := db.Conn.Exec(query, userID, trialEnd)
 	return err
 }
 
