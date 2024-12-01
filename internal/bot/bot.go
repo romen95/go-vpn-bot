@@ -27,6 +27,8 @@ func RunBot(database *database.DB, botToken string) {
 		DB:  database,
 	}
 
+	go handler.StartDailySubscriptionCheck()
+
 	// Настраиваем получение обновлений
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60

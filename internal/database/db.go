@@ -16,7 +16,7 @@ type User struct {
 	ID                  int64
 	Balance             float64
 	Config              string
-	TrialEndDate        sql.NullTime
+	Trial               bool
 	SubscriptionEndDate sql.NullTime
 }
 
@@ -47,7 +47,7 @@ func createUsersTable(conn *sql.DB) error {
 		id INTEGER PRIMARY KEY,
 		balance REAL DEFAULT 0,
 		config TEXT DEFAULT '',
-		trial_end_date DATETIME DEFAULT NULL,
+		trial BOOLEAN DEFAULT FALSE,
 		subscription_end_date DATETIME DEFAULT NULL
 	);
 	`
@@ -66,8 +66,8 @@ func (db *DB) Close() {
 
 func (db *DB) GetUserByID(userID int64) *User {
 	var user User
-	query := "SELECT id, balance, config, trial_end_date, subscription_end_date FROM users WHERE id = ?"
-	err := db.Conn.QueryRow(query, userID).Scan(&user.ID, &user.Balance, &user.Config, &user.TrialEndDate, &user.SubscriptionEndDate)
+	query := "SELECT id, balance, config, trial, subscription_end_date FROM users WHERE id = ?"
+	err := db.Conn.QueryRow(query, userID).Scan(&user.ID, &user.Balance, &user.Config, &user.Trial, &user.SubscriptionEndDate)
 	if err != nil {
 		return nil
 	}
@@ -75,8 +75,8 @@ func (db *DB) GetUserByID(userID int64) *User {
 }
 
 func (db *DB) CreateUser(userID int64, trialDays int) error {
-	trialEnd := time.Now().AddDate(0, 0, trialDays) // добавляем 7 дней
-	query := "INSERT INTO users (id, balance, config, trial_end_date) VALUES (?, 0, '', ?)"
+	trialEnd := time.Now().AddDate(0, 0, trialDays) // добавляем дни пробного периода
+	query := "INSERT INTO users (id, balance, config, trial, subscription_end_date) VALUES (?, 0, '', TRUE, ?)"
 	_, err := db.Conn.Exec(query, userID, trialEnd)
 	return err
 }
@@ -88,7 +88,7 @@ func (db *DB) UpdateUserBalance(userID int64, amount float64) error {
 }
 
 func (db *DB) GetAllUsers() ([]User, error) {
-	rows, err := db.Conn.Query("SELECT id, balance, config FROM users")
+	rows, err := db.Conn.Query("SELECT id, balance, config, trial FROM users")
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func (db *DB) GetAllUsers() ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var user User
-		err := rows.Scan(&user.ID, &user.Balance, &user.Config)
+		err := rows.Scan(&user.ID, &user.Balance, &user.Config, &user.Trial)
 		if err != nil {
 			return nil, err
 		}
@@ -131,9 +131,9 @@ func (db *DB) GetUserConfig(userID int64) string {
 	return config
 }
 
-func (db *DB) UpdateTrialEndDate(userID int64, endDate time.Time) error {
-	query := "UPDATE users SET trial_end_date = ? WHERE id = ?"
-	_, err := db.Conn.Exec(query, endDate, userID)
+func (db *DB) UpdateTrialStatus(userID int64, isTrial bool) error {
+	query := "UPDATE users SET trial = ? WHERE id = ?"
+	_, err := db.Conn.Exec(query, isTrial, userID)
 	return err
 }
 
@@ -141,4 +141,11 @@ func (db *DB) UpdateSubscriptionEndDate(userID int64, endDate time.Time) error {
 	query := "UPDATE users SET subscription_end_date = ? WHERE id = ?"
 	_, err := db.Conn.Exec(query, endDate, userID)
 	return err
+}
+
+func (user *User) GetSubscriptionEndDate() time.Time {
+	if user.SubscriptionEndDate.Valid {
+		return user.SubscriptionEndDate.Time
+	}
+	return time.Time{} // возвращает пустое время, если дата не установлена
 }

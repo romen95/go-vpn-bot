@@ -9,7 +9,7 @@ database:
     driver: sqlite
     dsn: vpn-bot.db
 marzban:
-    api_key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImFjY2VzcyI6InN1ZG8iLCJpYXQiOjE3MzI4NzI0ODYsImV4cCI6MTczMjk1ODg4Nn0.a-ysasR1ZhZ3q3OaDfwW7cd2d9VJKgcTxx80Pj_PRE0
+    api_key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImFjY2VzcyI6InN1ZG8iLCJpYXQiOjE3MzMwNzc3MTksImV4cCI6MTczMzE2NDExOX0.nhJ4Fiya-lAFAoTdfZAx3El5uGTdXVvf6GGTWAU_ECE
     api_url: https://boogaga.duckdns.org:63055
     password: SS1XcMqa6Y
     username: admin
