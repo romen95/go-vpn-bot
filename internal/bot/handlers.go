@@ -52,10 +52,9 @@ func (h *BotHandler) CheckSubscriptionsAndNotify() {
 
 	// Проверяем каждого пользователя
 	for _, user := range users {
-		if user.GetSubscriptionEndDate().Before(time.Now()) { // Если подписка истекла
+		if user.SubscriptionEndDate.Time.Before(time.Now()) { // Если подписка истекла
 			// Удаляем конфиг из базы данных
 			err := h.DB.UpdateUserConfig(user.ID, "")
-			log.Printf("User subscription end: %v, current time: %v", user.GetSubscriptionEndDate(), time.Now())
 			if err != nil {
 				log.Printf("Ошибка удаления конфигурации для пользователя %d: %v", user.ID, err)
 				return
@@ -97,13 +96,28 @@ func (h *BotHandler) SendCheckResults(checkedCount, deletedCount int) {
 	}
 }
 
+func (h *BotHandler) SendSubscriptionInfo(callback *tgbotapi.CallbackQuery) {
+	// ID вашего канала
+	channelID := "-1002480497483" // Замените на ваш канал
+
+	// Создаем сообщение
+	messageText := fmt.Sprintf("Пользователь %d получил тестовый период!", callback.Message.Chat.ID)
+
+	// Отправляем сообщение в канал
+	msg := tgbotapi.NewMessageToChannel(channelID, messageText)
+	if _, err := h.Bot.Send(msg); err != nil {
+		log.Printf("Ошибка отправки сообщения в канал: %v", err)
+	}
+}
+
 func (h *BotHandler) HandleMessage(message *tgbotapi.Message) {
 	switch message.Text {
 	case "/start":
 		h.handleStart(message)
+	case "/check":
 		h.CheckSubscriptionsAndNotify()
 	default:
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Неизвестная команда. Попробуйте /start, /balance, /get_config или /delete_config.")
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Неизвестная команда. Введите /start")
 		if _, err := h.Bot.Send(msg); err != nil {
 			log.Printf("Ошибка отправки сообщения: %v", err)
 		}
@@ -114,6 +128,7 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 	log.Printf("Обработка callback: %s", callback.Data) // Лог для отладки
 	switch callback.Data {
 	case "get_started":
+		h.SendSubscriptionInfo(callback)
 		configUser := h.DB.GetUserConfig(callback.Message.Chat.ID)
 		if configUser == "" {
 			username := fmt.Sprintf("%d", callback.Message.Chat.ID)
@@ -188,8 +203,8 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 			"Вы увидите подробную инструкцию по настройке со ссылкой на скачивание приложения\n\n" +
 			"Текущий сервер подключения:\n" +
 			"🇳🇱 Нидерланды\n\n" +
-			"🟢 Нажмите на КЛЮЧ и он автоматически скопируется:\n" +
-			configUser
+			"🟢 Нажмите на данный конфиг и он скопируется автоматически:\n" +
+			"```\n" + configUser + "\n```"
 
 		// Создаем inline-кнопку
 		buttonIOS := tgbotapi.NewInlineKeyboardButtonData("📱 iOS", "get_ios_guide")
@@ -211,6 +226,8 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 			keyboard,
 		)
 
+		editMsg.ParseMode = "MarkdownV2"
+
 		if _, err := h.Bot.Send(editMsg); err != nil {
 			log.Printf("Ошибка отправки приветственного сообщения: %v", err)
 		}
@@ -225,8 +242,8 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		text := "📶 Мой конфиг\n\n" +
 			"Текущий сервер подключения:\n" +
 			"🇳🇱 Нидерланды\n\n" +
-			"🟢 Нажмите на КЛЮЧ и он автоматически скопируется:\n" +
-			configUser +
+			"🟢 Нажмите на данный конфиг и он скопируется автоматически:\n" +
+			"```\n" + configUser + "\n```" +
 			"\n\nВы можете оплатить подписку, оплаченный период добавится к текущему количеству оставшихся дней"
 		if configUser == "" {
 			text = "На данный момент у вас нет действйющего конфига.\n\n" +
@@ -246,6 +263,8 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 			text,
 			keyboard,
 		)
+
+		editMsg.ParseMode = "MarkdownV2"
 
 		if _, err := h.Bot.Send(editMsg); err != nil {
 			log.Printf("Ошибка отправки приветственного сообщения: %v", err)

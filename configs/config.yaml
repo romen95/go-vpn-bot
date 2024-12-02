@@ -1,7 +1,7 @@
 app:
     check_interval_minutes: 60
     default_traffic_limit_gb: 10
-    test_period_days: 7
+    test_period_days: 8
 bot:
     admin_id: 123456789
     token: 7656241581:AAHo0Dt2RWKw93uYQNV4riWBaDRgfGR8ayw
@@ -9,8 +9,8 @@ database:
     driver: sqlite
     dsn: vpn-bot.db
 marzban:
-    api_key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImFjY2VzcyI6InN1ZG8iLCJpYXQiOjE3MzMwNzc3MTksImV4cCI6MTczMzE2NDExOX0.nhJ4Fiya-lAFAoTdfZAx3El5uGTdXVvf6GGTWAU_ECE
-    api_url: https://boogaga.duckdns.org:63055
+    api_key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImFjY2VzcyI6InN1ZG8iLCJpYXQiOjE3MzMxNDY4MTgsImV4cCI6MTczMzIzMzIxOH0.JbfG5M6kPII6Kegv8oNF-c1v8W9VGxomKHM799ASHnI
+    api_url: https://90.156.228.124:63055
     password: SS1XcMqa6Y
     username: admin
 payments:

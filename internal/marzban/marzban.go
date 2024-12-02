@@ -2,11 +2,14 @@ package marzban
 
 import (
 	"bytes"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 
 	"github.com/spf13/viper"
 )
@@ -47,8 +50,29 @@ func GetAPIKey(apiURL, username, password string) (string, error) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("accept", "application/json")
 
+	cert, err := os.ReadFile("internal/marzban/root.crt")
+	if err != nil {
+		panic(fmt.Errorf("failed to read certificate file: %w", err))
+	}
+
+	// Создайте пул доверенных сертификатов
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(cert) {
+		panic("failed to append certificate to pool")
+	}
+
+	// Настройте TLS-клиент с доверенным сертификатом
+	tlsConfig := &tls.Config{
+		RootCAs: certPool,
+	}
+
 	// Выполняем запрос
-	client := &http.Client{}
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+		},
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("ошибка выполнения запроса: %v", err)
@@ -129,7 +153,29 @@ func CreateUser(apiURL, apiKey, username string) (*UserResponse, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 
-	client := &http.Client{}
+	cert, err := os.ReadFile("internal/marzban/root.crt")
+	if err != nil {
+		panic(fmt.Errorf("failed to read certificate file: %w", err))
+	}
+
+	// Создайте пул доверенных сертификатов
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(cert) {
+		panic("failed to append certificate to pool")
+	}
+
+	// Настройте TLS-клиент с доверенным сертификатом
+	tlsConfig := &tls.Config{
+		RootCAs: certPool,
+	}
+
+	// Выполняем запрос
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+		},
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка выполнения запроса: %v", err)
@@ -184,7 +230,29 @@ func DeleteUser(apiURL, apiKey, username string) error {
 
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 
-	client := &http.Client{}
+	cert, err := os.ReadFile("internal/marzban/root.crt")
+	if err != nil {
+		panic(fmt.Errorf("failed to read certificate file: %w", err))
+	}
+
+	// Создайте пул доверенных сертификатов
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(cert) {
+		panic("failed to append certificate to pool")
+	}
+
+	// Настройте TLS-клиент с доверенным сертификатом
+	tlsConfig := &tls.Config{
+		RootCAs: certPool,
+	}
+
+	// Выполняем запрос
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+		},
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("ошибка выполнения DELETE-запроса: %v", err)

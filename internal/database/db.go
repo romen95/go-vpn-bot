@@ -88,7 +88,7 @@ func (db *DB) UpdateUserBalance(userID int64, amount float64) error {
 }
 
 func (db *DB) GetAllUsers() ([]User, error) {
-	rows, err := db.Conn.Query("SELECT id, balance, config, trial FROM users")
+	rows, err := db.Conn.Query("SELECT id, balance, config, trial, subscription_end_date FROM users")
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func (db *DB) GetAllUsers() ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var user User
-		err := rows.Scan(&user.ID, &user.Balance, &user.Config, &user.Trial)
+		err := rows.Scan(&user.ID, &user.Balance, &user.Config, &user.Trial, &user.SubscriptionEndDate)
 		if err != nil {
 			return nil, err
 		}
@@ -141,11 +141,4 @@ func (db *DB) UpdateSubscriptionEndDate(userID int64, endDate time.Time) error {
 	query := "UPDATE users SET subscription_end_date = ? WHERE id = ?"
 	_, err := db.Conn.Exec(query, endDate, userID)
 	return err
-}
-
-func (user *User) GetSubscriptionEndDate() time.Time {
-	if user.SubscriptionEndDate.Valid {
-		return user.SubscriptionEndDate.Time
-	}
-	return time.Time{} // возвращает пустое время, если дата не установлена
 }
