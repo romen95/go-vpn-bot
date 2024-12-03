@@ -46,31 +46,45 @@ func (h *BotHandler) StartDailySubscriptionCheck() {
 
 func (h *BotHandler) CheckSubscriptionsAndNotify() {
 	// Получаем список всех пользователей
-	users, _ := h.DB.GetAllUsers()
+	users, err := h.DB.GetAllUsers()
+	if err != nil {
+		log.Printf("Ошибка получения пользователей")
+	}
 
 	var checkedCount, deletedCount int
 
 	// Проверяем каждого пользователя
 	for _, user := range users {
 		if user.SubscriptionEndDate.Time.Before(time.Now()) { // Если подписка истекла
-			// Удаляем конфиг из базы данных
-			err := h.DB.UpdateUserConfig(user.ID, "")
-			if err != nil {
-				log.Printf("Ошибка удаления конфигурации для пользователя %d: %v", user.ID, err)
-				return
-			}
+			// Список ссылок на строки конфигов
+			configs := []*string{&user.Config1, &user.Config2, &user.Config3}
 
-			// Удаляем пользователя с Marzban
-			cfg, err := config.LoadConfig()
-			if err != nil {
-				log.Printf("Ошибка загрузки конфигурации: %v", err)
-				return
-			}
+			// Удаляем конфиги из базы данных и с Marzban
+			for i, configUser := range configs {
+				if *configUser != "" { // Проверяем, что конфиг существует
+					// Обнуляем конфиг в базе данных
+					err := h.DB.UpdateUserConfig(user.ID, i+1, "")
+					if err != nil {
+						log.Printf("Ошибка удаления конфигурации для пользователя %d (Config%d): %v", user.ID, i+1, err)
+						return
+					}
 
-			err = marzban.DeleteUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, fmt.Sprintf("%d", user.ID))
-			if err != nil {
-				log.Printf("Ошибка удаления пользователя с Marzban для %d: %v", user.ID, err)
-				return
+					// Удаляем пользователя с Marzban
+					cfg, err := config.LoadConfig()
+					if err != nil {
+						log.Printf("Ошибка загрузки конфигурации: %v", err)
+						return
+					}
+
+					err = marzban.DeleteUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, fmt.Sprintf("%d_device%d", user.ID, i+1))
+					if err != nil {
+						log.Printf("Ошибка удаления пользователя с Marzban для %d_device%d: %v", user.ID, i+1, err)
+						return
+					}
+
+					// Обнуляем конфиг в структуре пользователя
+					*configUser = ""
+				}
 			}
 
 			deletedCount++
@@ -129,9 +143,9 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 	switch callback.Data {
 	case "get_started":
 		h.SendSubscriptionInfo(callback)
-		configUser := h.DB.GetUserConfig(callback.Message.Chat.ID)
+		configUser := h.DB.GetUserConfig(callback.Message.Chat.ID, 1)
 		if configUser == "" {
-			username := fmt.Sprintf("%d", callback.Message.Chat.ID)
+			username := fmt.Sprintf("%d_device1", callback.Message.Chat.ID)
 
 			cfg, err := config.LoadConfig()
 			if err != nil {
@@ -185,7 +199,7 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 			}
 
 			// Сохраняем конфиг в базе данных
-			err = h.DB.UpdateUserConfig(callback.Message.Chat.ID, userResp.Message)
+			err = h.DB.UpdateUserConfig(callback.Message.Chat.ID, 1, userResp.Message)
 			if err != nil {
 				log.Printf("Ошибка обновления конфига в базе для пользователя %d: %v", callback.Message.Chat.ID, err)
 				msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Произошла ошибка при сохранении конфигурации.")
@@ -194,7 +208,7 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 				}
 				return
 			}
-			configUser = h.DB.GetUserConfig(callback.Message.Chat.ID)
+			configUser = h.DB.GetUserConfig(callback.Message.Chat.ID, 1)
 		}
 
 		// Информация о сервисе
@@ -238,16 +252,15 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 			log.Printf("Ошибка отправки ответа на CallbackQuery: %v", err)
 		}
 	case "get_config":
-		configUser := h.DB.GetUserConfig(callback.Message.Chat.ID)
+		configUser := h.DB.GetUserConfig(callback.Message.Chat.ID, 1)
 		text := "📶 Мой конфиг\n\n" +
 			"Текущий сервер подключения:\n" +
 			"🇳🇱 Нидерланды\n\n" +
 			"🟢 Нажмите на данный конфиг и он скопируется автоматически:\n" +
-			"```\n" + configUser + "\n```" +
-			"\n\nВы можете оплатить подписку, оплаченный период добавится к текущему количеству оставшихся дней"
+			"```\n" + configUser + "\n```"
 		if configUser == "" {
-			text = "На данный момент у вас нет действйющего конфига.\n\n" +
-				"Вы можете оплатить подписку и начать пользоваться сервисом."
+			text = "На данный момент у вас нет действйющих конфигов\\.\n\n" +
+				"Вы можете оплатить подписку и начать пользоваться сервисом\\."
 		}
 
 		buttonPay := tgbotapi.NewInlineKeyboardButtonData("💳 Оплатить", "pay_method")
@@ -281,19 +294,18 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		if user != nil {
 			trialEnd := user.SubscriptionEndDate.Time
 			daysRemaining := int(trialEnd.Sub(time.Now()).Hours() / 24)
-			if daysRemaining < 0 {
-				daysRemaining = 0 // Пробный период завершён
+			text = fmt.Sprintf("Вам доступно %d дней бесплатного пробного периода.\n\nВы можете оплатить подписку, оплаченный период добавится к текущему количеству оставшихся дней.", daysRemaining)
+			if daysRemaining <= 0 {
+				text = fmt.Sprintf("Ваш пробный период закончился.\n\nДля того, чтобы продолжить позьзоваться сервисом, оплатите подписку.")
 			}
-
-			text = fmt.Sprintf("Вам доступно %d дней бесплатного пробного периода.", daysRemaining)
 		} else {
 			// Если по какой-то причине нет пользователя
-			text = "Ваш пробный период завершён."
+			text = "Пользователь не найден."
 		}
 
 		// Создаем inline-кнопки для различных платформ
 		buttonPay := tgbotapi.NewInlineKeyboardButtonData("💳 Оплатить", "pay_method")
-		buttonConfigs := tgbotapi.NewInlineKeyboardButtonData("📶 Мой конфиг", "get_config")
+		buttonConfigs := tgbotapi.NewInlineKeyboardButtonData("📶 Мои устройства", "get_config")
 		buttonSupport := tgbotapi.NewInlineKeyboardButtonData("🆘 Написать в поддержку", "get_support")
 		buttonGuide := tgbotapi.NewInlineKeyboardButtonData("⚙️ Инструкция использования", "get_guide")
 
