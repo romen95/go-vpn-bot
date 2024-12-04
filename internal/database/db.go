@@ -166,6 +166,12 @@ func (db *DB) UpdateTrialStatus(userID int64, isTrial bool) error {
 	return err
 }
 
+func (db *DB) UpdateActiveStatus(userID int64, isActive bool) error {
+	query := "UPDATE users SET is_active = ? WHERE id = ?"
+	_, err := db.Conn.Exec(query, isActive, userID)
+	return err
+}
+
 func (db *DB) UpdateSubscriptionEndDate(userID int64, endDate time.Time) error {
 	query := "UPDATE users SET subscription_end_date = ? WHERE id = ?"
 	_, err := db.Conn.Exec(query, endDate, userID)

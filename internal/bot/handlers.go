@@ -3,6 +3,7 @@ package bot
 import (
 	"fmt"
 	"log"
+	"runtime"
 	"time"
 
 	"go-vpn-bot/internal/database"
@@ -18,17 +19,31 @@ type BotHandler struct {
 	DB  *database.DB
 }
 
-func (h *BotHandler) StartDailySubscriptionCheck() {
-	// Настроим ежедневную задачу на 19:00 по МСК (UTC+3)
-	location, err := time.LoadLocation("Europe/Moscow")
-	if err != nil {
-		log.Fatalf("Ошибка при загрузке локации: %v", err)
+func logWithLocation(format string, args ...interface{}) {
+	pc, file, line, ok := runtime.Caller(1)
+
+	if !ok {
+		log.Printf("Ошибка получения информации о месте вызова")
+		return
 	}
+
+	funcName := runtime.FuncForPC(pc).Name()
+	location := log.Prefix() + file + ":" + funcName + ":" + string(line)
+	log.Printf(location+" "+format, args...)
+}
+
+func (h *BotHandler) StartDailySubscriptionCheck() {
+	location, err := time.LoadLocation("Europe/Moscow")
+
+	if err != nil {
+		logWithLocation("Ошибка загрузки локации %v", err)
+		return
+	}
+
 	for {
 		now := time.Now().In(location)
 		nextRun := time.Date(now.Year(), now.Month(), now.Day(), 19, 0, 0, 0, location)
 
-		// Если текущее время уже прошло 19:00, ставим на завтрашний день
 		if now.After(nextRun) {
 			nextRun = nextRun.Add(24 * time.Hour)
 		}
@@ -36,60 +51,79 @@ func (h *BotHandler) StartDailySubscriptionCheck() {
 		duration := nextRun.Sub(now)
 		log.Printf("Следующая проверка подписок запланирована на %v", nextRun)
 
-		// Ожидаем до следующей 19:00
 		time.Sleep(duration)
 
-		// Выполняем проверку подписок
 		h.CheckSubscriptionsAndNotify()
 	}
 }
 
 func (h *BotHandler) CheckSubscriptionsAndNotify() {
-	// Получаем список всех пользователей
 	users, err := h.DB.GetAllUsers()
+
 	if err != nil {
-		log.Printf("Ошибка получения пользователей")
+		logWithLocation("Ошибка получения пользователей %v", err)
+		return
 	}
 
 	var checkedCount, deletedCount int
 
-	// Проверяем каждого пользователя
 	for _, user := range users {
-		if user.SubscriptionEndDate.Time.Before(time.Now()) { // Если подписка истекла
-			// Список ссылок на строки конфигов
-			configs := []*string{&user.Config1, &user.Config2, &user.Config3}
 
-			// Удаляем конфиги из базы данных и с Marzban
+		if !user.IsFriend && user.IsActive && user.SubscriptionEndDate.Time.Before(time.Now()) {
+			configs := []string{user.Config1, user.Config2, user.Config3}
+
 			for i, configUser := range configs {
-				if *configUser != "" { // Проверяем, что конфиг существует
-					// Обнуляем конфиг в базе данных
-					err := h.DB.UpdateUserConfig(user.ID, i+1, "")
-					if err != nil {
-						log.Printf("Ошибка удаления конфигурации для пользователя %d (Config%d): %v", user.ID, i+1, err)
-						return
-					}
-
-					// Удаляем пользователя с Marzban
+				if configUser != "" {
 					cfg, err := config.LoadConfig()
 					if err != nil {
-						log.Printf("Ошибка загрузки конфигурации: %v", err)
+						logWithLocation("Ошибка загрузки конфигурации: %v", err)
 						return
 					}
 
 					err = marzban.DeleteUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, fmt.Sprintf("%d_device%d", user.ID, i+1))
 					if err != nil {
-						log.Printf("Ошибка удаления пользователя с Marzban для %d_device%d: %v", user.ID, i+1, err)
-						return
-					}
+						logWithLocation("Получаем новый токен")
+						// Получаем новый токен
+						newAPIKey, err := marzban.GetAPIKey(cfg.Marzban.APIURL, cfg.Marzban.Username, cfg.Marzban.Password)
+						if err != nil {
+							logWithLocation("Не удалось получить новый токен: %v", err)
+							return
+						}
 
-					// Обнуляем конфиг в структуре пользователя
-					*configUser = ""
+						err = marzban.UpdateAPIKey("configs/config.yaml", newAPIKey)
+						if err != nil {
+							logWithLocation("Не удалось обновить конфиг: %v", err)
+							return
+						}
+
+						// Повторяем запрос CreateUser
+						cfg.Marzban.APIKey = newAPIKey // Обновляем APIKey в памяти
+						err = marzban.DeleteUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, fmt.Sprintf("%d_device%d", user.ID, i+1))
+						if err != nil {
+							logWithLocation("Ошибка удаления пользователя даже после обновления токена: %v", err)
+							return
+						}
+					}
+					h.DB.UpdateUserConfig(user.ID, i+1, "")
 				}
+			}
+			err = h.DB.UpdateTrialStatus(user.ID, false)
+			if err != nil {
+				logWithLocation("Ошибка обновления тестового статуса у пользователя %d: %v", user.ID, err)
+				return
+			}
+
+			err = h.DB.UpdateActiveStatus(user.ID, false)
+			if err != nil {
+				logWithLocation("Ошибка обновления активного статуса у пользователя %d: %v", user.ID, err)
+				return
 			}
 
 			deletedCount++
 		}
-		checkedCount++
+		if !user.IsFriend {
+			checkedCount++
+		}
 	}
 
 	// Отправляем информацию в Telegram-канал
@@ -135,6 +169,91 @@ func (h *BotHandler) HandleMessage(message *tgbotapi.Message) {
 		if _, err := h.Bot.Send(msg); err != nil {
 			log.Printf("Ошибка отправки сообщения: %v", err)
 		}
+	}
+}
+
+func (h *BotHandler) handleStart(message *tgbotapi.Message) {
+	user := h.DB.GetUserByID(message.Chat.ID)
+	if user == nil {
+		// Если пользователь не найден, создаем нового с 7 днями пробного периода
+		cfg, err := config.LoadConfig()
+		if err != nil {
+			log.Printf("Ошибка загрузки конфигурации: %v", err)
+			msg := tgbotapi.NewMessage(message.Chat.ID, "Ошибка загрузки конфигурации.")
+			if _, err := h.Bot.Send(msg); err != nil {
+				log.Printf("Ошибка отправки сообщения: %v", err)
+			}
+			return
+		}
+		// Создаем нового пользователя с тестовым периодом
+		err = h.DB.CreateUser(message.Chat.ID, cfg.App.TestPeriodDays)
+		if err != nil {
+			msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании пользователя.")
+			if _, err := h.Bot.Send(msg); err != nil {
+				log.Printf("Ошибка отправки сообщения: %v", err)
+			}
+			return
+		}
+
+		// Сообщение для нового пользователя
+		welcomeText := "Добро пожаловать в Boo VPN!\n\n" +
+			"🔒 Безопасное соединение\n" +
+			"🌍 Доступ к заблокированным сайтам\n" +
+			"📈 Высокая скорость"
+
+		// Создаем inline-кнопку
+		button := tgbotapi.NewInlineKeyboardButtonData("Поехали!", "get_started")
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(button),
+		)
+
+		// Отправляем сообщение с кнопкой
+		msg := tgbotapi.NewMessage(message.Chat.ID, welcomeText)
+		msg.ReplyMarkup = keyboard
+		if _, err := h.Bot.Send(msg); err != nil {
+			log.Printf("Ошибка отправки приветственного сообщения: %v", err)
+		}
+		return
+	}
+
+	trialEnd := user.SubscriptionEndDate.Time
+	daysRemaining := int(trialEnd.Sub(time.Now()).Hours() / 24)
+	var text string
+	if user.IsTrial {
+		text = fmt.Sprintf("Количество оставшихся дней до окончания тестового периода: %d\n\n"+
+			"Вы можете оплатить подписку, оплаченный период добавится к текущему количеству оставшихся дней.", daysRemaining)
+	}
+
+	if !user.IsTrial {
+		text = fmt.Sprintf("Количество оставшихся дней до окончания подписки: %d\n\n", daysRemaining)
+	}
+
+	if !user.IsActive {
+		text = "Оплатите подписку, чтобы продолжить пользоваться сервисом."
+	}
+
+	if user.IsFriend {
+		text = "Ты пользуешься сервисом бесплатно!"
+	}
+
+	// Создаем inline-кнопки для различных платформ
+	buttonPay := tgbotapi.NewInlineKeyboardButtonData("💳 Оплатить", "pay_method")
+	buttonConfigs := tgbotapi.NewInlineKeyboardButtonData("📶 Мой конфиг", "get_config")
+	buttonSupport := tgbotapi.NewInlineKeyboardButtonData("🆘 Написать в поддержку", "get_support")
+	buttonGuide := tgbotapi.NewInlineKeyboardButtonData("⚙️ Инструкция использования", "get_guide")
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(buttonPay),
+		tgbotapi.NewInlineKeyboardRow(buttonConfigs),
+		tgbotapi.NewInlineKeyboardRow(buttonSupport),
+		tgbotapi.NewInlineKeyboardRow(buttonGuide),
+	)
+
+	// Отправляем сообщение о пробном периоде с кнопками
+	msg := tgbotapi.NewMessage(message.Chat.ID, text)
+	msg.ReplyMarkup = keyboard
+	if _, err := h.Bot.Send(msg); err != nil {
+		log.Printf("Ошибка отправки сообщения о пробном периоде: %v", err)
 	}
 }
 
@@ -288,23 +407,35 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 			log.Printf("Ошибка отправки ответа на CallbackQuery: %v", err)
 		}
 	case "get_main":
-		var text string
 		user := h.DB.GetUserByID(callback.Message.Chat.ID)
-		if user != nil {
-			trialEnd := user.SubscriptionEndDate.Time
-			daysRemaining := int(trialEnd.Sub(time.Now()).Hours() / 24)
-			text = fmt.Sprintf("Вам доступно %d дней бесплатного пробного периода.\n\nВы можете оплатить подписку, оплаченный период добавится к текущему количеству оставшихся дней.", daysRemaining)
-			if daysRemaining <= 0 {
-				text = fmt.Sprintf("Ваш пробный период закончился.\n\nДля того, чтобы продолжить позьзоваться сервисом, оплатите подписку.")
-			}
-		} else {
-			// Если по какой-то причине нет пользователя
-			text = "Пользователь не найден."
+		if user == nil {
+			log.Printf("Ошибка ошибка получения пользователя")
+			return
+		}
+
+		trialEnd := user.SubscriptionEndDate.Time
+		daysRemaining := int(trialEnd.Sub(time.Now()).Hours() / 24)
+		var text string
+		if user.IsTrial {
+			text = fmt.Sprintf("Количество оставшихся дней до окончания тестового периода: %d\n\n"+
+				"Вы можете оплатить подписку, оплаченный период добавится к текущему количеству оставшихся дней.", daysRemaining)
+		}
+
+		if !user.IsTrial {
+			text = fmt.Sprintf("Количество оставшихся дней до окончания подписки: %d\n\n", daysRemaining)
+		}
+
+		if !user.IsActive {
+			text = "Оплатите подписку, чтобы продолжить пользоваться сервисом."
+		}
+
+		if user.IsFriend {
+			text = "Ты пользуешься сервисом бесплатно!"
 		}
 
 		// Создаем inline-кнопки для различных платформ
 		buttonPay := tgbotapi.NewInlineKeyboardButtonData("💳 Оплатить", "pay_method")
-		buttonConfigs := tgbotapi.NewInlineKeyboardButtonData("📶 Мои устройства", "get_config")
+		buttonConfigs := tgbotapi.NewInlineKeyboardButtonData("📶 Мои конфиги", "get_config")
 		buttonSupport := tgbotapi.NewInlineKeyboardButtonData("🆘 Написать в поддержку", "get_support")
 		buttonGuide := tgbotapi.NewInlineKeyboardButtonData("⚙️ Инструкция использования", "get_guide")
 
@@ -332,249 +463,8 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		if _, err := h.Bot.Request(callbackResp); err != nil {
 			log.Printf("Ошибка отправки ответа на CallbackQuery: %v", err)
 		}
-	case "new_device":
-		user := h.DB.GetUserByID(callback.Message.Chat.ID)
-
-		// Проверяем количество занятых конфигов
-		configs := []string{user.Config1, user.Config2, user.Config3}
-		freeIndex := -1
-		for i, cfg := range configs {
-			if cfg == "" {
-				freeIndex = i
-				break
-			}
-		}
-
-		if freeIndex == -1 {
-			// Если все конфиги заняты
-			text := "У вас уже создано максимальное количество устройств (3)."
-			msg := tgbotapi.NewMessage(callback.Message.Chat.ID, text)
-			h.Bot.Send(msg)
-			return
-		}
-
-		// Формируем кнопки для выбора устройства
-		buttons := tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("📱 Телефон", "create_device_1"),
-				tgbotapi.NewInlineKeyboardButtonData("🖥️ Компьютер", "create_device_2"),
-				tgbotapi.NewInlineKeyboardButtonData("💻 Ноутбук", "create_device_3"),
-			),
-		)
-
-		text := "Выберите устройство для нового конфига:"
-		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, text)
-		msg.ReplyMarkup = buttons
-		h.Bot.Send(msg)
-
-	case "create_device_1", "create_device_2", "create_device_3":
-		deviceType := ""
-		switch callback.Data {
-		case "create_device_1":
-			deviceType = "device1"
-		case "create_device_2":
-			deviceType = "device2"
-		case "create_device_3":
-			deviceType = "device3"
-		}
-
-		user := h.DB.GetUserByID(callback.Message.Chat.ID)
-
-		configs := []string{user.Config1, user.Config2, user.Config3}
-		freeIndex := -1
-		for i, cfg := range configs {
-			if cfg == "" {
-				freeIndex = i
-				break
-			}
-		}
-
-		if freeIndex == -1 {
-			text := "Ошибка: у вас уже есть три конфигурации."
-			msg := tgbotapi.NewMessage(callback.Message.Chat.ID, text)
-			h.Bot.Send(msg)
-			return
-		}
-
-		// Создаем конфиг через API Marzban
-		cfg, err := config.LoadConfig()
-		if err != nil {
-			log.Printf("Ошибка загрузки конфигурации: %v", err)
-			return
-		}
-
-		userResp, err := marzban.CreateUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, fmt.Sprintf("%d_%s", user.ID, deviceType))
-		if err != nil {
-			log.Printf("Получаем новый токен")
-			// Получаем новый токен
-			newAPIKey, err := marzban.GetAPIKey(cfg.Marzban.APIURL, cfg.Marzban.Username, cfg.Marzban.Password)
-			if err != nil {
-				log.Printf("Не удалось получить новый токен: %v", err)
-				msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Произошла ошибка при создании VPN-конфигурации.")
-				h.Bot.Send(msg)
-				return
-			}
-
-			err = marzban.UpdateAPIKey("configs/config.yaml", newAPIKey)
-			if err != nil {
-				log.Printf("Не удалось обновить конфиг: %v", err)
-				msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Произошла ошибка при обновлении конфигурации.")
-				h.Bot.Send(msg)
-				return
-			}
-
-			// Повторяем запрос CreateUser
-			cfg.Marzban.APIKey = newAPIKey // Обновляем APIKey в памяти
-			userResp, err = marzban.CreateUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, fmt.Sprintf("%d_%s", user.ID, deviceType))
-			if err != nil {
-				log.Printf("Ошибка создания пользователя даже после обновления токена: %v", err)
-				msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Произошла ошибка при создании VPN-конфигурации.")
-				h.Bot.Send(msg)
-				return
-			}
-		}
-
-		if !userResp.Success {
-			log.Printf("Не удалось создать пользователя в Marzban для %d: %s", callback.Message.Chat.ID, userResp.Message)
-			msg := tgbotapi.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("Ошибка создания конфигурации: %s", userResp.Message))
-			if _, err := h.Bot.Send(msg); err != nil {
-				log.Printf("Ошибка отправки сообщения: %v", err)
-			}
-			return
-		}
-
-		// Сохраняем конфиг в свободное поле
-		err = h.DB.UpdateUserConfig(callback.Message.Chat.ID, freeIndex+1, userResp.Message)
-		if err != nil {
-			text := "Ошибка при сохранении конфигурации в базу данных."
-			msg := tgbotapi.NewMessage(callback.Message.Chat.ID, text)
-			h.Bot.Send(msg)
-			log.Printf("Ошибка сохранения конфига: %v", err)
-			return
-		}
-
-		text := fmt.Sprintf("Устройство \"%s\" успешно создано!\nКонфигурация добавлена.", deviceType)
-		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, text)
-		h.Bot.Send(msg)
-
-		// Отображение кнопок для конфигов
-		buttons := []tgbotapi.InlineKeyboardButton{}
-		for i, cfg := range configs {
-			if cfg != "" {
-				buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("Конфиг %d", i+1), fmt.Sprintf("show_config_%d", i+1)))
-			}
-		}
-		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData("🏡 В главное меню", "get_main"))
-
-		keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons)
-		msg = tgbotapi.NewMessage(callback.Message.Chat.ID, "Ваши конфиги:")
-		msg.ReplyMarkup = keyboard
-		h.Bot.Send(msg)
-
-	case "show_config_1", "show_config_2", "show_config_3":
-		index := 0
-		switch callback.Data {
-		case "show_config_1":
-			index = 0
-		case "show_config_2":
-			index = 1
-		case "show_config_3":
-			index = 2
-		}
-
-		user := h.DB.GetUserByID(callback.Message.Chat.ID)
-
-		configs := []string{user.Config1, user.Config2, user.Config3}
-		config := configs[index]
-
-		text := fmt.Sprintf("Ваш конфиг %d:\n```\n%s\n```", index+1, config)
-		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, text)
-		msg.ParseMode = "MarkdownV2"
-
-		h.Bot.Send(msg)
-
 	default:
 		log.Printf("Неизвестное действие: %s", callback.Data)
-	}
-}
-
-func (h *BotHandler) handleStart(message *tgbotapi.Message) {
-	user := h.DB.GetUserByID(message.Chat.ID)
-	if user == nil {
-		// Если пользователь не найден, создаем нового с 7 днями пробного периода
-		cfg, err := config.LoadConfig()
-		if err != nil {
-			log.Printf("Ошибка загрузки конфигурации: %v", err)
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Ошибка загрузки конфигурации.")
-			if _, err := h.Bot.Send(msg); err != nil {
-				log.Printf("Ошибка отправки сообщения: %v", err)
-			}
-			return
-		}
-		// Создаем нового пользователя с тестовым периодом
-		err = h.DB.CreateUser(message.Chat.ID, cfg.App.TestPeriodDays)
-		if err != nil {
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании пользователя.")
-			if _, err := h.Bot.Send(msg); err != nil {
-				log.Printf("Ошибка отправки сообщения: %v", err)
-			}
-			return
-		}
-
-		// Сообщение для нового пользователя
-		welcomeText := "Добро пожаловать в Boo VPN!\n\n" +
-			"🔒 Безопасное соединение\n" +
-			"🌍 Доступ к заблокированным сайтам\n" +
-			"📈 Высокая скорость"
-
-		// Создаем inline-кнопку
-		button := tgbotapi.NewInlineKeyboardButtonData("Поехали!", "get_started")
-		keyboard := tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(button),
-		)
-
-		// Отправляем сообщение с кнопкой
-		msg := tgbotapi.NewMessage(message.Chat.ID, welcomeText)
-		msg.ReplyMarkup = keyboard
-		if _, err := h.Bot.Send(msg); err != nil {
-			log.Printf("Ошибка отправки приветственного сообщения: %v", err)
-		}
-		return
-	}
-
-	// Вычисляем оставшиеся дни пробного периода
-	var text string
-	if user != nil {
-		trialEnd := user.SubscriptionEndDate.Time
-		daysRemaining := int(trialEnd.Sub(time.Now()).Hours() / 24)
-		if daysRemaining < 0 {
-			daysRemaining = 0 // Пробный период завершён
-		}
-
-		text = fmt.Sprintf("Вам доступно %d дней бесплатного пробного периода.\n\nВы можете оплатить подписку, оплаченный период добавится к текущему количеству оставшихся дней.", daysRemaining)
-	} else {
-		// Если по какой-то причине нет пользователя
-		text = "Ваш пробный период завершён."
-	}
-
-	// Создаем inline-кнопки для различных платформ
-	buttonPay := tgbotapi.NewInlineKeyboardButtonData("💳 Оплатить", "pay_method")
-	buttonConfigs := tgbotapi.NewInlineKeyboardButtonData("📶 Мой конфиг", "get_config")
-	buttonSupport := tgbotapi.NewInlineKeyboardButtonData("🆘 Написать в поддержку", "get_support")
-	buttonGuide := tgbotapi.NewInlineKeyboardButtonData("⚙️ Инструкция использования", "get_guide")
-
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(buttonPay),
-		tgbotapi.NewInlineKeyboardRow(buttonConfigs),
-		tgbotapi.NewInlineKeyboardRow(buttonSupport),
-		tgbotapi.NewInlineKeyboardRow(buttonGuide),
-	)
-
-	// Отправляем сообщение о пробном периоде с кнопками
-	msg := tgbotapi.NewMessage(message.Chat.ID, text)
-	msg.ReplyMarkup = keyboard
-	if _, err := h.Bot.Send(msg); err != nil {
-		log.Printf("Ошибка отправки сообщения о пробном периоде: %v", err)
 	}
 }
 

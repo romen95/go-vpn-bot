@@ -17,7 +17,7 @@ func RunBot(database *database.DB, botToken string) {
 	}
 
 	// Включаем режим дебага (опционально)
-	bot.Debug = true
+	bot.Debug = false
 
 	log.Printf("Бот запущен: %s", bot.Self.UserName)
 
