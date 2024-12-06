@@ -676,13 +676,11 @@ func (h *BotHandler) handleDeleteDevice(callback *tgbotapi.CallbackQuery, device
 	}
 
 	text := fmt.Sprintf("📱 Устройство %d\n\nКонфиг для этого устройства удален\\.", deviceNumber)
+	buttonBack := tgbotapi.NewInlineKeyboardButtonData("◀️ Назад", "get_config")
+	buttonMain := tgbotapi.NewInlineKeyboardButtonData("🏡 В главное меню", "get_main")
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("◀️ Назад", "get_config"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🏡 В главное меню", "get_main"),
-		),
+		tgbotapi.NewInlineKeyboardRow(buttonBack),
+		tgbotapi.NewInlineKeyboardRow(buttonMain),
 	)
 
 	if userConfig != "" {
