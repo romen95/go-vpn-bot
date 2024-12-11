@@ -9,7 +9,7 @@ database:
     driver: sqlite
     dsn: vpn-bot.db
 marzban:
-    api_key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImFjY2VzcyI6InN1ZG8iLCJpYXQiOjE3MzM0NzMxMTEsImV4cCI6MTczMzU1OTUxMX0.JJ3mXcQlJX8eauI-ZLn48JukAw7qa-ULewwuxoRHP0E
+    api_key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImFjY2VzcyI6InN1ZG8iLCJpYXQiOjE3MzM5MTcyMjAsImV4cCI6MTczNDAwMzYyMH0.utpwQsTj37AyUYzqJh87-1ECsb2EAAhn23fvIvCzs1Q
     api_url: https://90.156.228.124:63055
     password: SS1XcMqa6Y
     username: admin
