@@ -57,6 +57,14 @@ func (h *BotHandler) StartDailySubscriptionCheck() {
 	}
 }
 
+func (h *BotHandler) notifyUser(user database.User, message string) {
+	msg := tgbotapi.NewMessage(user.ID, message)
+	_, err := h.Bot.Send(msg)
+	if err != nil {
+		logWithLocation("Ошибка отправки уведомления пользователю %d: %v", user.ID, err)
+	}
+}
+
 func (h *BotHandler) CheckSubscriptionsAndNotify() {
 	users, err := h.DB.GetAllUsers()
 
@@ -66,43 +74,50 @@ func (h *BotHandler) CheckSubscriptionsAndNotify() {
 	}
 
 	var checkedCount, deletedCount int
+	now := time.Now()
 
 	for _, user := range users {
+		subscriptionEnd := user.SubscriptionEndDate.Time
+		if subscriptionEnd.After(now) && subscriptionEnd.Before(now.Add(3*24*time.Hour)) {
+			h.notifyUser(user, "Ваша подписка истекает через 3 дня. Пожалуйста, продлите её, чтобы продолжить пользоваться услугами.")
+		}
 
-		if !user.IsFriend && user.IsActive && user.SubscriptionEndDate.Time.Before(time.Now()) {
+		// Уведомление за 1 день до окончания
+		if subscriptionEnd.After(now) && subscriptionEnd.Before(now.Add(24*time.Hour)) {
+			h.notifyUser(user, "Внимание! Завтра истекает срок действия вашей подписки. Не забудьте оплатить!")
+		}
+		if !user.IsFriend && user.IsActive && subscriptionEnd.Before(now) {
 			configs := []string{user.Config1, user.Config2, user.Config3}
 
-			for i, configUser := range configs {
-				if configUser != "" {
-					cfg, err := config.LoadConfig()
+			for i, _ := range configs {
+				cfg, err := config.LoadConfig()
+				if err != nil {
+					logWithLocation("Ошибка загрузки конфигурации: %v", err)
+					return
+				}
+
+				err = marzban.DeleteUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, fmt.Sprintf("%d_device%d", user.ID, i+1))
+				if err != nil {
+					logWithLocation("Получаем новый токен")
+					// Получаем новый токен
+					newAPIKey, err := marzban.GetAPIKey(cfg.Marzban.APIURL, cfg.Marzban.Username, cfg.Marzban.Password)
 					if err != nil {
-						logWithLocation("Ошибка загрузки конфигурации: %v", err)
+						logWithLocation("Не удалось получить новый токен: %v", err)
 						return
 					}
 
+					err = marzban.UpdateAPIKey("configs/config.yaml", newAPIKey)
+					if err != nil {
+						logWithLocation("Не удалось обновить конфиг: %v", err)
+						return
+					}
+
+					// Повторяем запрос CreateUser
+					cfg.Marzban.APIKey = newAPIKey // Обновляем APIKey в памяти
 					err = marzban.DeleteUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, fmt.Sprintf("%d_device%d", user.ID, i+1))
 					if err != nil {
-						logWithLocation("Получаем новый токен")
-						// Получаем новый токен
-						newAPIKey, err := marzban.GetAPIKey(cfg.Marzban.APIURL, cfg.Marzban.Username, cfg.Marzban.Password)
-						if err != nil {
-							logWithLocation("Не удалось получить новый токен: %v", err)
-							return
-						}
-
-						err = marzban.UpdateAPIKey("configs/config.yaml", newAPIKey)
-						if err != nil {
-							logWithLocation("Не удалось обновить конфиг: %v", err)
-							return
-						}
-
-						// Повторяем запрос CreateUser
-						cfg.Marzban.APIKey = newAPIKey // Обновляем APIKey в памяти
-						err = marzban.DeleteUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, fmt.Sprintf("%d_device%d", user.ID, i+1))
-						if err != nil {
-							logWithLocation("Ошибка удаления пользователя даже после обновления токена: %v", err)
-							return
-						}
+						logWithLocation("Ошибка удаления пользователя даже после обновления токена: %v", err)
+						return
 					}
 					h.DB.UpdateUserConfig(user.ID, i+1, "")
 				}
@@ -828,164 +843,3 @@ func (h *BotHandler) HandleUpdate(update tgbotapi.Update) {
 		h.HandleMessage(update.Message)
 	}
 }
-
-// func (h *BotHandler) handleBalance(message *tgbotapi.Message) {
-// 	user := h.DB.GetUserByID(message.Chat.ID)
-// 	if user == nil {
-// 		msg := tgbotapi.NewMessage(message.Chat.ID, "Вы не зарегистрированы. Используйте /start для начала.")
-// 		if _, err := h.Bot.Send(msg); err != nil {
-// 			log.Printf("Ошибка отправки сообщения: %v", err)
-// 		}
-// 		return
-// 	}
-
-// 	msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Ваш баланс: %.2f руб.", user.Balance))
-// 	if _, err := h.Bot.Send(msg); err != nil {
-// 		log.Printf("Ошибка отправки сообщения: %v", err)
-// 	}
-// }
-
-// func (h *BotHandler) handleGetConfig(message *tgbotapi.Message) {
-// 	user := h.DB.GetUserByID(message.Chat.ID)
-// 	if user == nil {
-// 		msg := tgbotapi.NewMessage(message.Chat.ID, "Вы не зарегистрированы. Используйте /start для начала.")
-// 		if _, err := h.Bot.Send(msg); err != nil {
-// 			log.Printf("Ошибка отправки сообщения: %v", err)
-// 		}
-// 		return
-// 	}
-
-// 	if user.Config != "" {
-// 		// Если конфиг уже существует, просто отправляем его
-// 		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("У вас уже есть конфиг:\n%s\n\nЧтобы получить новый конфиг, удалите старый, используя /delete_config.", user.Config))
-// 		if _, err := h.Bot.Send(msg); err != nil {
-// 			log.Printf("Ошибка отправки сообщения: %v", err)
-// 		}
-// 		return
-// 	}
-
-// 	// Генерируем имя пользователя на основе ID
-// 	username := fmt.Sprintf("%d", message.Chat.ID)
-
-// 	cfg, err := config.LoadConfig()
-// 	if err != nil {
-// 		log.Printf("Ошибка загрузки конфигурации: %v", err)
-// 		msg := tgbotapi.NewMessage(message.Chat.ID, "Ошибка загрузки конфигурации.")
-// 		if _, err := h.Bot.Send(msg); err != nil {
-// 			log.Printf("Ошибка отправки сообщения: %v", err)
-// 		}
-// 		return
-// 	}
-
-// 	// Отправляем запрос на создание пользователя в Marzban
-// 	userResp, err := marzban.CreateUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, username)
-// 	if err != nil {
-// 		log.Printf("Получаем новый токен")
-// 		// Получаем новый токен
-// 		newAPIKey, err := marzban.GetAPIKey(cfg.Marzban.APIURL, cfg.Marzban.Username, cfg.Marzban.Password)
-// 		if err != nil {
-// 			log.Printf("Не удалось получить новый токен: %v", err)
-// 			msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании VPN-конфигурации.")
-// 			h.Bot.Send(msg)
-// 			return
-// 		}
-
-// 		err = marzban.UpdateAPIKey("configs/config.yaml", newAPIKey)
-// 		if err != nil {
-// 			log.Printf("Не удалось обновить конфиг: %v", err)
-// 			msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при обновлении конфигурации.")
-// 			h.Bot.Send(msg)
-// 			return
-// 		}
-
-// 		// Повторяем запрос CreateUser
-// 		cfg.Marzban.APIKey = newAPIKey // Обновляем APIKey в памяти
-// 		userResp, err = marzban.CreateUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, username)
-// 		if err != nil {
-// 			log.Printf("Ошибка создания пользователя даже после обновления токена: %v", err)
-// 			msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании VPN-конфигурации.")
-// 			h.Bot.Send(msg)
-// 			return
-// 		}
-// 	}
-
-// 	if !userResp.Success {
-// 		log.Printf("Не удалось создать пользователя в Marzban для %d: %s", message.Chat.ID, userResp.Message)
-// 		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Ошибка создания конфигурации: %s", userResp.Message))
-// 		if _, err := h.Bot.Send(msg); err != nil {
-// 			log.Printf("Ошибка отправки сообщения: %v", err)
-// 		}
-// 		return
-// 	}
-
-// 	// Сохраняем конфиг в базе данных
-// 	err = h.DB.UpdateUserConfig(message.Chat.ID, userResp.Message)
-// 	if err != nil {
-// 		log.Printf("Ошибка обновления конфига в базе для пользователя %d: %v", message.Chat.ID, err)
-// 		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при сохранении конфигурации.")
-// 		if _, err := h.Bot.Send(msg); err != nil {
-// 			log.Printf("Ошибка отправки сообщения: %v", err)
-// 		}
-// 		return
-// 	}
-
-// 	msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Ваш конфиг успешно создан: %s", userResp.Message))
-// 	if _, err := h.Bot.Send(msg); err != nil {
-// 		log.Printf("Ошибка отправки сообщения: %v", err)
-// 	}
-// }
-
-// func (h *BotHandler) handleDeleteConfig(message *tgbotapi.Message) {
-// 	user := h.DB.GetUserByID(message.Chat.ID)
-// 	if user == nil {
-// 		msg := tgbotapi.NewMessage(message.Chat.ID, "Вы не зарегистрированы. Используйте /start для начала.")
-// 		if _, err := h.Bot.Send(msg); err != nil {
-// 			log.Printf("Ошибка отправки сообщения: %v", err)
-// 		}
-// 		return
-// 	}
-
-// 	if user.Config == "" {
-// 		msg := tgbotapi.NewMessage(message.Chat.ID, "У вас нет сохранённого конфига.")
-// 		if _, err := h.Bot.Send(msg); err != nil {
-// 			log.Printf("Ошибка отправки сообщения: %v", err)
-// 		}
-// 		return
-// 	}
-
-// 	username := fmt.Sprintf("%d", message.Chat.ID)
-
-// 	cfg, err := config.LoadConfig()
-// 	if err != nil {
-// 		log.Printf("Ошибка загрузки конфигурации: %v", err)
-// 		msg := tgbotapi.NewMessage(message.Chat.ID, "Ошибка загрузки конфигурации.")
-// 		if _, err := h.Bot.Send(msg); err != nil {
-// 			log.Printf("Ошибка отправки сообщения: %v", err)
-// 		}
-// 		return
-// 	}
-
-// 	err = marzban.DeleteUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, username)
-// 	if err != nil {
-// 		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Ошибка удаления пользователя: %v", err))
-// 		if _, err := h.Bot.Send(msg); err != nil {
-// 			log.Printf("Ошибка отправки сообщения: %v", err)
-// 		}
-// 		return
-// 	}
-
-// 	// Очищаем поле Config в базе данных
-// 	err = h.DB.UpdateUserConfig(message.Chat.ID, "")
-// 	if err != nil {
-// 		msg := tgbotapi.NewMessage(message.Chat.ID, "Ошибка обновления базы данных.")
-// 		if _, err := h.Bot.Send(msg); err != nil {
-// 			log.Printf("Ошибка отправки сообщения: %v", err)
-// 		}
-// 		return
-// 	}
-
-// 	msg := tgbotapi.NewMessage(message.Chat.ID, "Ваш конфиг удалён. Вы можете создать новый, используя /get_config.")
-// 	if _, err := h.Bot.Send(msg); err != nil {
-// 		log.Printf("Ошибка отправки сообщения: %v", err)
-// 	}
-// }
