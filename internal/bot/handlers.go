@@ -78,71 +78,77 @@ func (h *BotHandler) CheckSubscriptionsAndNotify() {
 
 	for _, user := range users {
 		subscriptionEnd := user.SubscriptionEndDate.Time
-		if subscriptionEnd.After(now) && subscriptionEnd.Before(now.Add(3*24*time.Hour)) {
+		daysLeft := int(subscriptionEnd.Sub(now).Hours()/24) + 1
+		log.Printf("Осталось дней: %d", daysLeft)
+
+		// Уведомление за 3 дня
+		if daysLeft == 3 {
 			h.notifyUser(user, "Ваша подписка истекает через 3 дня. Пожалуйста, продлите её, чтобы продолжить пользоваться услугами.")
 		}
 
-		// Уведомление за 1 день до окончания
-		if subscriptionEnd.After(now) && subscriptionEnd.Before(now.Add(24*time.Hour)) {
+		// Уведомление за 1 день
+		if daysLeft == 1 {
 			h.notifyUser(user, "Внимание! Завтра истекает срок действия вашей подписки. Не забудьте оплатить!")
 		}
+
 		if !user.IsFriend && user.IsActive && subscriptionEnd.Before(now) {
 			configs := []string{user.Config1, user.Config2, user.Config3}
 
-			for i, _ := range configs {
-				cfg, err := config.LoadConfig()
-				if err != nil {
-					logWithLocation("Ошибка загрузки конфигурации: %v", err)
-					return
-				}
-
-				err = marzban.DeleteUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, fmt.Sprintf("%d_device%d", user.ID, i+1))
-				if err != nil {
-					logWithLocation("Получаем новый токен")
-					// Получаем новый токен
-					newAPIKey, err := marzban.GetAPIKey(cfg.Marzban.APIURL, cfg.Marzban.Username, cfg.Marzban.Password)
+			for i, configUser := range configs {
+				if configUser != "" {
+					cfg, err := config.LoadConfig()
 					if err != nil {
-						logWithLocation("Не удалось получить новый токен: %v", err)
+						logWithLocation("Ошибка загрузки конфигурации: %v", err)
 						return
 					}
 
-					err = marzban.UpdateAPIKey("configs/config.yaml", newAPIKey)
-					if err != nil {
-						logWithLocation("Не удалось обновить конфиг: %v", err)
-						return
-					}
-
-					// Повторяем запрос CreateUser
-					cfg.Marzban.APIKey = newAPIKey // Обновляем APIKey в памяти
 					err = marzban.DeleteUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, fmt.Sprintf("%d_device%d", user.ID, i+1))
 					if err != nil {
-						logWithLocation("Ошибка удаления пользователя даже после обновления токена: %v", err)
-						return
+						logWithLocation("Получаем новый токен")
+						// Получаем новый токен
+						newAPIKey, err := marzban.GetAPIKey(cfg.Marzban.APIURL, cfg.Marzban.Username, cfg.Marzban.Password)
+						if err != nil {
+							logWithLocation("Не удалось получить новый токен: %v", err)
+							return
+						}
+
+						err = marzban.UpdateAPIKey("configs/config.yaml", newAPIKey)
+						if err != nil {
+							logWithLocation("Не удалось обновить конфиг: %v", err)
+							return
+						}
+
+						// Повторяем запрос CreateUser
+						cfg.Marzban.APIKey = newAPIKey // Обновляем APIKey в памяти
+						err = marzban.DeleteUser(cfg.Marzban.APIURL, cfg.Marzban.APIKey, fmt.Sprintf("%d_device%d", user.ID, i+1))
+						if err != nil {
+							logWithLocation("Ошибка удаления пользователя даже после обновления токена: %v", err)
+							return
+						}
 					}
 					h.DB.UpdateUserConfig(user.ID, i+1, "")
 				}
-			}
-			err = h.DB.UpdateTrialStatus(user.ID, false)
-			if err != nil {
-				logWithLocation("Ошибка обновления тестового статуса у пользователя %d: %v", user.ID, err)
-				return
-			}
+				err = h.DB.UpdateTrialStatus(user.ID, false)
+				if err != nil {
+					logWithLocation("Ошибка обновления тестового статуса у пользователя %d: %v", user.ID, err)
+					return
+				}
 
-			err = h.DB.UpdateActiveStatus(user.ID, false)
-			if err != nil {
-				logWithLocation("Ошибка обновления активного статуса у пользователя %d: %v", user.ID, err)
-				return
+				err = h.DB.UpdateActiveStatus(user.ID, false)
+				if err != nil {
+					logWithLocation("Ошибка обновления активного статуса у пользователя %d: %v", user.ID, err)
+					return
+				}
 			}
-
 			deletedCount++
 		}
 		if !user.IsFriend {
 			checkedCount++
 		}
-	}
 
-	// Отправляем информацию в Telegram-канал
-	h.SendCheckResults(checkedCount, deletedCount)
+		// Отправляем информацию в Telegram-канал
+		h.SendCheckResults(checkedCount, deletedCount)
+	}
 }
 
 func (h *BotHandler) SendCheckResults(checkedCount, deletedCount int) {
@@ -445,7 +451,7 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 	case "get_config":
 		user := h.DB.GetUserByID(callback.Message.Chat.ID)
 		if user == nil {
-			log.Printf("Ошибка ошибка получения пользователя")
+			log.Printf("Ошибка получения пользователя")
 			return
 		}
 
@@ -550,7 +556,7 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		}
 
 		if !user.IsActive {
-			text = "Оплатите подписку, чтобы продолжить пользоваться сервисом."
+			text = "Оплатите подписку, чтобы продолжить пользоваться сервисом\\."
 			buttonPay := tgbotapi.NewInlineKeyboardButtonData("💳 Оплатить", "pay_method")
 			keyboard = tgbotapi.NewInlineKeyboardMarkup(
 				tgbotapi.NewInlineKeyboardRow(buttonPay),
@@ -701,7 +707,7 @@ func (h *BotHandler) handleDeleteDevice(callback *tgbotapi.CallbackQuery, device
 	if userConfig != "" {
 		if err := deleteUserFromMarzban(user.ID, deviceNumber); err != nil {
 			log.Printf("Ошибка удаления пользователя из Marzban: %v", err)
-			text = fmt.Sprintf("📱 Устройство %d\n\nНе удалось удалить конфиг, попробуйте позже.", deviceNumber)
+			text = fmt.Sprintf("📱 Устройство %d\n\nНе удалось удалить конфиг, попробуйте позже\\.", deviceNumber)
 		} else {
 			h.DB.UpdateUserConfig(user.ID, deviceNumber, "")
 		}
