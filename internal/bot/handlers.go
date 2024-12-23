@@ -79,16 +79,10 @@ func (h *BotHandler) CheckSubscriptionsAndNotify() {
 	for _, user := range users {
 		subscriptionEnd := user.SubscriptionEndDate.Time
 		daysLeft := int(subscriptionEnd.Sub(now).Hours()/24) + 1
-		log.Printf("Осталось дней: %d", daysLeft)
 
 		// Уведомление за 3 дня
 		if daysLeft == 3 {
 			h.notifyUser(user, "Ваша подписка истекает через 3 дня. Пожалуйста, продлите её, чтобы продолжить пользоваться услугами.")
-		}
-
-		// Уведомление за 1 день
-		if daysLeft == 1 {
-			h.notifyUser(user, "Внимание! Завтра истекает срок действия вашей подписки. Не забудьте оплатить!")
 		}
 
 		if !user.IsFriend && user.IsActive && subscriptionEnd.Before(now) {
@@ -141,14 +135,14 @@ func (h *BotHandler) CheckSubscriptionsAndNotify() {
 				}
 			}
 			deletedCount++
+			h.notifyUser(user, "Доступ к сервису приостановлен. Оплатите подписку, чтобы продолжить пользоваться услугами.")
 		}
-		if !user.IsFriend {
+		if !user.IsFriend && user.IsActive {
 			checkedCount++
 		}
-
-		// Отправляем информацию в Telegram-канал
-		h.SendCheckResults(checkedCount, deletedCount)
 	}
+	// Отправляем информацию в Telegram-канал
+	h.SendCheckResults(checkedCount, deletedCount)
 }
 
 func (h *BotHandler) SendCheckResults(checkedCount, deletedCount int) {
@@ -588,6 +582,12 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		h.handleDeviceCallback(callback, 2)
 	case "get_device3":
 		h.handleDeviceCallback(callback, 3)
+	case "accept_delete_device1":
+		h.handleAcceptDeleteDevice(callback, 1)
+	case "accept_delete_device2":
+		h.handleAcceptDeleteDevice(callback, 2)
+	case "accept_delete_device3":
+		h.handleAcceptDeleteDevice(callback, 3)
 	case "delete_device1":
 		h.handleDeleteDevice(callback, 1)
 	case "delete_device2":
@@ -624,7 +624,7 @@ func (h *BotHandler) sendDeviceConfig(callback *tgbotapi.CallbackQuery, deviceNu
 			userConfig,
 		)
 
-		buttonDelete := tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("❌ Удалить конфиг %d", deviceNumber), fmt.Sprintf("delete_device%d", deviceNumber))
+		buttonDelete := tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("❌ Удалить конфиг %d", deviceNumber), fmt.Sprintf("accept_delete_device%d", deviceNumber))
 		buttonBack := tgbotapi.NewInlineKeyboardButtonData("◀️ Назад", "get_config")
 		buttonMain := tgbotapi.NewInlineKeyboardButtonData("🏡 В главное меню", "get_main")
 		keyboard = tgbotapi.NewInlineKeyboardMarkup(
@@ -674,6 +674,34 @@ func (h *BotHandler) handleDeviceCallback(callback *tgbotapi.CallbackQuery, devi
 	}
 
 	h.sendDeviceConfig(callback, deviceNumber, userConfig)
+}
+
+func (h *BotHandler) handleAcceptDeleteDevice(callback *tgbotapi.CallbackQuery, deviceNumber int) {
+	text := fmt.Sprintf("📱 Устройство %d\n\nВы уверены, что хотите удалить данный конфиг\\?", deviceNumber)
+	buttonAccept := tgbotapi.NewInlineKeyboardButtonData("✅ Да", fmt.Sprintf("delete_device%d", deviceNumber))
+	buttonCancel := tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", fmt.Sprintf("get_device%d", deviceNumber))
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(buttonAccept, buttonCancel),
+	)
+
+	editMsg := tgbotapi.NewEditMessageTextAndMarkup(
+		callback.Message.Chat.ID,
+		callback.Message.MessageID,
+		text,
+		keyboard,
+	)
+
+	editMsg.ParseMode = "MarkdownV2"
+
+	if _, err := h.Bot.Send(editMsg); err != nil {
+		log.Printf("Ошибка отправки меню с конфигами: %v", err)
+	}
+
+	// Отправляем ответ на callback
+	callbackResp := tgbotapi.NewCallback(callback.ID, "Ответ готов!")
+	if _, err := h.Bot.Request(callbackResp); err != nil {
+		log.Printf("Ошибка отправки ответа на CallbackQuery: %v", err)
+	}
 }
 
 func (h *BotHandler) handleDeleteDevice(callback *tgbotapi.CallbackQuery, deviceNumber int) {
@@ -758,6 +786,15 @@ func deleteUserFromMarzban(userID int64, deviceNumber int) error {
 
 func (h *BotHandler) handleNewDevice(callback *tgbotapi.CallbackQuery, deviceNumber int) {
 	userID := callback.Message.Chat.ID
+	user := h.DB.GetUserByID(userID)
+
+	if !user.IsActive {
+		callbackResp := tgbotapi.NewCallback(callback.ID, "Срок подписки истек!")
+		if _, err := h.Bot.Request(callbackResp); err != nil {
+			log.Printf("Ошибка отправки CallbackQuery: %v", err)
+		}
+		return
+	}
 
 	configUser := h.DB.GetUserConfig(userID, deviceNumber)
 	if configUser != "" {
@@ -785,7 +822,7 @@ func (h *BotHandler) handleNewDevice(callback *tgbotapi.CallbackQuery, deviceNum
 
 	// Создаём клавиатуру
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("❌ Удалить конфиг", fmt.Sprintf("delete_device%d", deviceNumber))),
+		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("❌ Удалить конфиг", fmt.Sprintf("accept_delete_device%d", deviceNumber))),
 		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("◀️ Назад", "get_config")),
 		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("🏡 В главное меню", "get_main")),
 	)
