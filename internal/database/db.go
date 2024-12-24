@@ -23,6 +23,7 @@ type User struct {
 	Config1             string
 	Config2             string
 	Config3             string
+	ReffererId          int64
 }
 
 // ConnectDB подключается к базе данных и создает таблицу, если она не существует
@@ -57,7 +58,8 @@ func createUsersTable(conn *sql.DB) error {
 		subscription_end_date DATETIME DEFAULT NULL,
 		config1 TEXT DEFAULT '',
 		config2 TEXT DEFAULT '',
-		config3 TEXT DEFAULT ''
+		config3 TEXT DEFAULT '',
+		refferer_id INTEGER DEFAULT NULL
 	);
 	`
 	_, err := conn.Exec(query)
@@ -75,8 +77,8 @@ func (db *DB) Close() {
 
 func (db *DB) GetUserByID(userID int64) *User {
 	var user User
-	query := "SELECT id, balance, is_trial, is_active, is_friend, subscription_end_date, config1, config2, config3 FROM users WHERE id = ?"
-	err := db.Conn.QueryRow(query, userID).Scan(&user.ID, &user.Balance, &user.IsTrial, &user.IsActive, &user.IsFriend, &user.SubscriptionEndDate, &user.Config1, &user.Config2, &user.Config3)
+	query := "SELECT id, balance, is_trial, is_active, is_friend, subscription_end_date, config1, config2, config3, refferer_id FROM users WHERE id = ?"
+	err := db.Conn.QueryRow(query, userID).Scan(&user.ID, &user.Balance, &user.IsTrial, &user.IsActive, &user.IsFriend, &user.SubscriptionEndDate, &user.Config1, &user.Config2, &user.Config3, &user.ReffererId)
 	if err != nil {
 		return nil
 	}
@@ -85,7 +87,7 @@ func (db *DB) GetUserByID(userID int64) *User {
 
 func (db *DB) CreateUser(userID int64, trialDays int) error {
 	trialEnd := time.Now().AddDate(0, 0, trialDays) // добавляем дни пробного периода
-	query := "INSERT INTO users (id, balance, is_trial, is_active, is_friend, subscription_end_date, config1, config2, config3) VALUES (?, 0, TRUE, TRUE, FALSE, ?, '', '', '')"
+	query := "INSERT INTO users (id, balance, is_trial, is_active, is_friend, subscription_end_date, config1, config2, config3, refferer_id) VALUES (?, 0, TRUE, TRUE, FALSE, ?, '', '', '', 0)"
 	_, err := db.Conn.Exec(query, userID, trialEnd)
 	return err
 }
@@ -97,7 +99,7 @@ func (db *DB) UpdateUserBalance(userID int64, amount float64) error {
 }
 
 func (db *DB) GetAllUsers() ([]User, error) {
-	rows, err := db.Conn.Query("SELECT id, balance, is_trial, is_active, is_friend, subscription_end_date, config1, config2, config3 FROM users")
+	rows, err := db.Conn.Query("SELECT id, balance, is_trial, is_active, is_friend, subscription_end_date, config1, config2, config3, refferer_id FROM users")
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +108,7 @@ func (db *DB) GetAllUsers() ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var user User
-		err := rows.Scan(&user.ID, &user.Balance, &user.IsTrial, &user.IsActive, &user.IsFriend, &user.SubscriptionEndDate, &user.Config1, &user.Config2, &user.Config3)
+		err := rows.Scan(&user.ID, &user.Balance, &user.IsTrial, &user.IsActive, &user.IsFriend, &user.SubscriptionEndDate, &user.Config1, &user.Config2, &user.Config3, &user.ReffererId)
 		if err != nil {
 			return nil, err
 		}
@@ -175,5 +177,11 @@ func (db *DB) UpdateActiveStatus(userID int64, isActive bool) error {
 func (db *DB) UpdateSubscriptionEndDate(userID int64, endDate time.Time) error {
 	query := "UPDATE users SET subscription_end_date = ? WHERE id = ?"
 	_, err := db.Conn.Exec(query, endDate, userID)
+	return err
+}
+
+func (db *DB) UpdateReffererID(reffererID int64, userID int64) error {
+	query := "UPDATE users SET refferer_id = ? WHERE id = ?"
+	_, err := db.Conn.Exec(query, reffererID, userID)
 	return err
 }
