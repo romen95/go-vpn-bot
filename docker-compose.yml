@@ -1,6 +1,10 @@
-version: "3.8"
+version: '3.8'
 services:
-  web:
-    build: .
+  app:
+    image: go-vpn-bot-web:latest
+    container_name: go-vpn-bot-web
     ports:
       - "8080:8080"
+    volumes:
+      - /path/to/sqlite_data:/app
+    restart: always
