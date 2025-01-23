@@ -1,0 +1,9 @@
+version: '3.8'
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: go-vpn-bot
+    volumes:
+      - /path/to/sqlite_data/vpn-bot.db:/app/vpn-bot.db:rw

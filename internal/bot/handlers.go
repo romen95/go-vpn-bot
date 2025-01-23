@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"go-vpn-bot/internal/database"
@@ -81,7 +83,7 @@ func (h *BotHandler) CheckSubscriptionsAndNotify() {
 		daysLeft := int(subscriptionEnd.Sub(now).Hours()/24) + 1
 
 		// Уведомление за 3 дня
-		if daysLeft == 3 {
+		if !user.IsFriend && user.IsActive && daysLeft == 3 {
 			h.notifyUser(user, "Ваша подписка истекает через 3 дня. Пожалуйста, продлите её, чтобы продолжить пользоваться услугами.")
 		}
 
@@ -173,11 +175,20 @@ func (h *BotHandler) SendSubscriptionInfo(callback *tgbotapi.CallbackQuery) {
 	}
 }
 
+func (h *BotHandler) SendNotificationToChannel(message string) {
+	// ID канала, например, -1001234567890
+	channelID := "-1002480497483"
+	msg := tgbotapi.NewMessageToChannel(channelID, message)
+	if _, err := h.Bot.Send(msg); err != nil {
+		log.Printf("Ошибка отправки сообщения в канал: %v", err)
+	}
+}
+
 func (h *BotHandler) HandleMessage(message *tgbotapi.Message) {
-	switch message.Text {
-	case "/start":
+	switch {
+	case strings.HasPrefix(message.Text, "/start"):
 		h.handleStart(message)
-	case "/check":
+	case message.Text == "/check":
 		h.CheckSubscriptionsAndNotify()
 	default:
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Неизвестная команда. Введите /start")
@@ -188,32 +199,57 @@ func (h *BotHandler) HandleMessage(message *tgbotapi.Message) {
 }
 
 func (h *BotHandler) handleStart(message *tgbotapi.Message) {
-	user := h.DB.GetUserByID(message.Chat.ID)
+	chatID := message.Chat.ID
+	user := h.DB.GetUserByID(chatID)
 	if user == nil {
 		// Если пользователь не найден, создаем нового с 7 днями пробного периода
 		cfg, err := config.LoadConfig()
 		if err != nil {
 			log.Printf("Ошибка загрузки конфигурации: %v", err)
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Ошибка загрузки конфигурации.")
-			if _, err := h.Bot.Send(msg); err != nil {
-				log.Printf("Ошибка отправки сообщения: %v", err)
-			}
-			return
-		}
-		// Создаем нового пользователя с тестовым периодом
-		err = h.DB.CreateUser(message.Chat.ID, cfg.App.TestPeriodDays)
-		if err != nil {
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании пользователя.")
+			msg := tgbotapi.NewMessage(chatID, "Ошибка загрузки конфигурации.")
 			if _, err := h.Bot.Send(msg); err != nil {
 				log.Printf("Ошибка отправки сообщения: %v", err)
 			}
 			return
 		}
 
+		err = h.DB.CreateUser(chatID, cfg.App.TestPeriodDays)
+		if err != nil {
+			msg := tgbotapi.NewMessage(chatID, "Произошла ошибка при создании пользователя.")
+			if _, err := h.Bot.Send(msg); err != nil {
+				log.Printf("Ошибка отправки сообщения: %v", err)
+			}
+			return
+		}
+
+		args := strings.Fields(message.Text)
+		var referrerID int64 = 0
+		log.Printf("Ошибка загрузки конфигурации: %v", args)
+
+		if len(args) == 2 && strings.HasPrefix(args[1], "ref_") {
+			// Извлекаем ID пригласившего
+			referrerID, _ = strconv.ParseInt(strings.TrimPrefix(args[1], "ref_"), 10, 64)
+		}
+
+		if referrerID != 0 && referrerID != chatID {
+			// Обновляем реферальные данные
+			err = h.DB.UpdateReffererID(referrerID, chatID)
+			if err != nil {
+				log.Printf("Ошибка обновления реферала: %v", err)
+			}
+
+			// Уведомляем канал
+			notification := fmt.Sprintf(
+				"🎉 Новый реферал!\n\nПользователь %d был приглашён пользователем %d.",
+				chatID, referrerID,
+			)
+			h.SendNotificationToChannel(notification)
+		}
+
 		// Сообщение для нового пользователя
-		welcomeText := "Добро пожаловать в Boo VPN!\n\n" +
+		welcomeText := "Добро пожаловать в 👁NoSeeNet👁\n\n" +
 			"🔒 Безопасное соединение\n" +
-			"🌍 Доступ к заблокированным сайтам\n" +
+			"🌍 Доступ ко всем сайтам\n" +
 			"📈 Высокая скорость"
 
 		// Создаем inline-кнопку
@@ -223,7 +259,7 @@ func (h *BotHandler) handleStart(message *tgbotapi.Message) {
 		)
 
 		// Отправляем сообщение с кнопкой
-		msg := tgbotapi.NewMessage(message.Chat.ID, welcomeText)
+		msg := tgbotapi.NewMessage(chatID, welcomeText)
 		msg.ReplyMarkup = keyboard
 		if _, err := h.Bot.Send(msg); err != nil {
 			log.Printf("Ошибка отправки приветственного сообщения: %v", err)
@@ -265,7 +301,7 @@ func (h *BotHandler) handleStart(message *tgbotapi.Message) {
 	)
 
 	// Отправляем сообщение о пробном периоде с кнопками
-	msg := tgbotapi.NewMessage(message.Chat.ID, text)
+	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ReplyMarkup = keyboard
 	if _, err := h.Bot.Send(msg); err != nil {
 		log.Printf("Ошибка отправки сообщения о пробном периоде: %v", err)
@@ -350,7 +386,7 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 			"Выберите операционную систему\n\n" +
 			"Вы увидите подробную инструкцию по настройке со ссылкой на скачивание приложения\n\n" +
 			"Текущий сервер подключения:\n" +
-			"🇳🇱 Нидерланды\n\n" +
+			"🇵🇱 Польша\n\n" +
 			"🟢 Нажмите на данный конфиг и он скопируется автоматически:\n" +
 			"```\n" + configUser + "\n```"
 
@@ -619,7 +655,7 @@ func (h *BotHandler) sendDeviceConfig(callback *tgbotapi.CallbackQuery, deviceNu
 		)
 	} else {
 		text = fmt.Sprintf(
-			"📱 Устройство %d\n\nТекущий сервер подключения:\n🇳🇱 Нидерланды\n\n🟢 Нажмите на данный конфиг и он скопируется автоматически:\n```\n%s\n```",
+			"📱 Устройство %d\n\nТекущий сервер подключения:\n🇵🇱 Польша\n\n🟢 Нажмите на данный конфиг и он скопируется автоматически:\n```\n%s\n```",
 			deviceNumber,
 			userConfig,
 		)
@@ -816,7 +852,7 @@ func (h *BotHandler) handleNewDevice(callback *tgbotapi.CallbackQuery, deviceNum
 
 	// Формируем текст сообщения
 	text := fmt.Sprintf(
-		"📱 Устройство %d\n\nТекущий сервер подключения:\n🇳🇱 Нидерланды\n\n🟢 Нажмите на данный конфиг и он скопируется автоматически:\n```\n%s\n```",
+		"📱 Устройство %d\n\nТекущий сервер подключения:\n🇵🇱 Польша\n\n🟢 Нажмите на данный конфиг и он скопируется автоматически:\n```\n%s\n```",
 		deviceNumber, userResp.Message,
 	)
 
