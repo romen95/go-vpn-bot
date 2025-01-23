@@ -1,10 +1,9 @@
 version: '3.8'
 services:
-  app:
-    image: go-vpn-bot-web:latest
-    container_name: go-vpn-bot-web
-    ports:
-      - "8080:8080"
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: go-vpn-bot
     volumes:
-      - /path/to/sqlite_data:/app
-    restart: always
+      - /path/to/sqlite_data/vpn-bot.db:/app/vpn-bot.db:rw

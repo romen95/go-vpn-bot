@@ -28,7 +28,7 @@ type User struct {
 
 // ConnectDB подключается к базе данных и создает таблицу, если она не существует
 func ConnectDB() (*DB, error) {
-	conn, err := sql.Open("sqlite", "vpn-bot.db")
+	conn, err := sql.Open("sqlite", "/app/vpn-bot.db")
 	if err != nil {
 		return nil, err
 	}
